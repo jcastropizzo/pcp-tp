@@ -2,13 +2,15 @@
 
 ## Estado actual
 
-Check-in del **miércoles 21/10/2026, 23:45, Buenos Aires**:
+Actualizado al **domingo 25/10/2026, Buenos Aires**. El miércoles 21 se informó:
 - [x] Leer la consigna.
 - [x] Leer documentación de una clase de Erlang para recuperar conceptos.
 - [x] Instalar Erlang CLI y rebar3.
 - [ ] Crear y verificar el proyecto ejecutable.
 - [ ] Implementar el primer comportamiento.
 - [ ] Escribir y ejecutar tests.
+
+Viernes 23 y sábado 24: sin estudio/avance informado. El bloque de PCP del sábado no se hizo. Falta confirmar el avance del jueves y la asistencia a ISW del viernes; no se dan por hechos.
 
 No hay implementación informada. No se registró tiempo efectivo fiable. No se asume avance de otros integrantes.
 
@@ -32,22 +34,22 @@ Son presupuestos orientativos, no disponibilidad confirmada. El README mantiene 
 
 | Día | Bloque | Objetivo y criterio de cierre |
 | --- | --- | --- |
-| Mié 21 | Cerrado | Consigna/documentación leídas y herramientas instaladas. Sin implementación. No agregar tareas a las 23:45. |
-| Jue 22 | Sin bloque PCP | Se mantiene ISW: ejercicio + lectura, alrededor del trabajo y la merienda. |
-| Vie 23 | Sin bloque PCP | Cursada ISW y cumpleaños de noche. |
-| Sáb 24 | 25 min | Preparar proyecto y comprobar compilación; registrar versiones/comando que funcionó. |
-| Sáb 24 | 60 min | Pedido/respuesta y put/get en una réplica; ejecución mínima observable. |
-| Sáb 24 | 40 min | Test del comportamiento local; borrado/cierre solo si la base ya funciona. Revisar compilación sin advertencias. |
-| Sáb 24 | 25 min | Guardar avance y esbozar estado/tabla de mensajes. Lista fiel de faltantes. Total 2 h 30 más pausa; cena y posible cine reservados. |
-| Dom 25 | 90 min | Terminar base local si falta. Si está lista: diseño breve y primera propagación asincrónica entre dos réplicas; comprobar convergencia sin conflictos. |
-| Dom 25 | 30 min | Inventario completo, estimación restante y preguntas para la cátedra. Además se preservan 60 min de ISW y hasta 45 min de margen por bloqueo real. |
-| Lun 26 | Consulta durante cursada | Confirmar fecha/modalidad y dudas de protocolo. Sin asumir horas de programación en clase ni antes del trabajo. Repaso ISW breve solo si existe hueco real. |
-| Mar 27 | Sin bloque PCP | ISW y compromisos ya previstos; no sumar sesión posterior. |
-| Mié 28 | Consulta; hasta 60 min solo si la clase lo permite | Revisar conflictos/borrados y ausencia de esperas bloqueantes; si la base local sigue fallando, priorizar eso. Cambio acotado probado o bloqueo descrito. Cierre de 10 min. |
-| Jue 29 | Sin bloque PCP obligatorio | Preparación del teórico de ISW. |
-| Vie 30 | 15 min, si hay hueco real | Rendir ISW; registrar estado del TP y planificar el siguiente tramo según plazo confirmado. Sin implementación pesada después de cursar. |
+| Mié 21 | Cerrado | Consigna/documentación leídas y herramientas instaladas. Sin implementación. |
+| Jue 22 | Estado sin confirmar | Se había previsto ISW + lectura y merienda; no contar el estudio como realizado. |
+| Vie 23 | Sin estudio informado | No había estudio extra obligatorio. Asistencia a ISW sin confirmar. |
+| Sáb 24 | No realizado | Se perdió el bloque de 2 h 30 de PCP. No trasladarlo entero como carga adicional al domingo. |
+| Dom 25 | PCP: 90 min, si hay disponibilidad | 20 min preparar/verificar proyecto; 55 min pedido/respuesta y put/get local; 15 min prueba reproducible y guardar. Cierre: caso local comprobado o bloqueo preciso; no exigir replicación. |
+| Dom 25 | ISW: 45 min | Verificar avance del jueves/asistencia del viernes y atacar una laguna prioritaria para el teórico. Cierre: dos respuestas breves propias contrastadas con el material y pendientes explícitos. |
+| Dom 25 | Cierre: 15 min | Actualizar estado real y preparar consulta concreta para PCP. Total orientativo: 2 h 30 efectivas más pausa de 10–15 min; no disponibilidad confirmada. |
+| Lun 26 | Consulta durante cursada | Destrabar base local o revisar diseño de replicación si ya funciona. Confirmar fecha/modalidad del TP. Repaso ISW de 25 min solo si hay hueco real. |
+| Mar 27 | Sin bloque PCP | ISW y compromisos previstos; confirmar alcance del teórico sin sumar sesión posterior. |
+| Mié 28 | Consulta; hasta 60 min solo si la clase lo permite | Completar base local si falta. Solo después, primera propagación asincrónica entre dos réplicas y prueba sin conflictos. Cierre: incremento comprobado o bloqueo descrito; no fingir que todo el protocolo está resuelto. |
+| Jue 29 | Sin bloque PCP obligatorio | Mantener preparación del teórico ISW (2 h orientativas), usando las lagunas reales del domingo/martes. |
+| Vie 30 | 15 min, si hay hueco real | Rendir ISW; inventario de requisitos pendientes y planificación siguiente según fecha confirmada. Sin implementación pesada después de cursar. |
 
-**No hay evidencia para garantizar que todo el TP entre en estos bloques.** El objetivo del primer fin de semana es una base verificable y una estimación mejor, no declarar completo el sistema. Si rige 2/11 y el esfuerzo restante no entra, explicitarlo y reorganizar con disponibilidad real. Si rige 11/11, ubicar el resto después del teórico reservando margen antes de la entrega y tiempo para los parciales de PCP 16/11 e ISW 17/11. No se calendarizan todavía jornadas enteras de noviembre.
+Si el domingo solo hay **90 min**: 60 min PCP + 25 min ISW + 5 min de cierre. Si hay menos, ajustar al tiempo real. No recuperar atrasos a costa de dormir ni asumir disponible la jornada completa.
+
+**Hay atraso respecto del plan, pero perder el sábado no demuestra por sí solo que la entrega sea inviable. Tampoco hay evidencia para garantizar llegar.** Se retira la expectativa de tener el TP completo el 30/10. Primero hace falta un incremento ejecutable, confirmar el plazo y estimar el trabajo restante. Si rige 2/11 y no entra, decirlo y reorganizar con disponibilidad real; si rige 11/11, distribuir el resto tras el teórico con margen de entrega y sin consumir toda la preparación de PCP 16/11 e ISW 17/11.
 
 ## Secuencia de implementación restante
 
