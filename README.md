@@ -20,7 +20,7 @@ No hay implementación informada. No se registró tiempo efectivo fiable. No se 
 
 [Original](https://github.com/jcastropizzo/pcp-material/blob/main/trabajos-practicos/tp-01-kv-replicado-erlang.pdf) · [Transcripción](https://github.com/jcastropizzo/pcp-material/blob/main/trabajos-practicos/tp-01-kv-replicado-erlang.transcripcion.md) · [Resumen de requisitos](https://github.com/jcastropizzo/pcp-material/blob/main/trabajos-practicos/tp-01-kv-replicado-erlang.resumen.md).
 
-**El PDF indica entrega el 11/11/2026 a las 23:59.** En la planificación previa se había informado 2/11. Queda pendiente confirmar cuál rige y por qué canal se entrega. No se asume una prórroga; el PDF no explicita zona horaria. Este plan usa Buenos Aires.
+**Entrega confirmada: miércoles 11/11/2026 a las 23:59**, según el PDF y la confirmación del alumno del 25/10. Se descarta el 2/11 de la planificación anterior. Este plan usa horario de Buenos Aires. Solo queda por verificar la modalidad/canal de entrega.
 
 Entregar implementación `.erl`, tests propios y documento de diseño de **máximo 5 páginas**. La API es fija: módulo `simple_kv`, exports `start_link/1, stop/1, put/3, put/4, delete/2, get/2`.
 
@@ -41,11 +41,11 @@ El domingo tiene hasta cinco horas confirmadas como máximo; el resto son presup
 | Vie 23 | Ausencia confirmada | No se asistió a ISW ni se estudió; recuperar material de la clase. |
 | Sáb 24 | No realizado | Se perdió el bloque de 2 h 30 de PCP. No trasladarlo entero como carga adicional al domingo. |
 | Dom 25 | Hasta 5 h incluyendo pausas | Seguir la secuencia detallada debajo: dos bloques PCP, dos ISW, diagnóstico y cierre. Un incremento local y comprensión comprobada de temas seleccionados; no exigir replicación. |
-| Lun 26 | Consulta durante cursada | Destrabar base local o revisar diseño de replicación si ya funciona. Confirmar fecha/modalidad del TP. Repaso ISW de 25 min solo si hay hueco real. |
+| Lun 26 | Consulta durante cursada | Destrabar base local o revisar diseño de replicación si ya funciona. Confirmar modalidad/canal de entrega del TP. Repaso ISW de 25 min solo si hay hueco real. |
 | Mar 27 | Sin bloque PCP | ISW y compromisos previstos; confirmar alcance del teórico sin sumar sesión posterior. |
 | Mié 28 | Consulta; hasta 60 min solo si la clase lo permite | Completar base local si falta. Solo después, primera propagación asincrónica entre dos réplicas y prueba sin conflictos. Cierre: incremento comprobado o bloqueo descrito; no fingir que todo el protocolo está resuelto. |
 | Jue 29 | Sin bloque PCP obligatorio | Mantener preparación del teórico ISW (2 h orientativas), usando las lagunas reales del domingo/martes. |
-| Vie 30 | 15 min, si hay hueco real | Rendir ISW; inventario de requisitos pendientes y planificación siguiente según fecha confirmada. Sin implementación pesada después de cursar. |
+| Vie 30 | 15 min, si hay hueco real | Rendir ISW; inventario de requisitos pendientes y planificación siguiente hacia la entrega del 11/11. Sin implementación pesada después de cursar. |
 
 ### Sesión del domingo 25 — máximo 5 horas
 
@@ -65,7 +65,7 @@ El domingo tiene hasta cinco horas confirmadas como máximo; el resto son presup
 
 La clase perdida del viernes contenía, según calendario oficial, Idioms, introducción a patrones, Decorator, Adapter y Proxy. Esto orienta la recuperación; el alcance del parcialito debe confirmarse con la cátedra. El viernes 30 sigue anunciado el parcialito en los primeros 30 minutos de la clase de las 17.
 
-**Hay atraso respecto del plan, pero perder el sábado no demuestra por sí solo que la entrega sea inviable. Tampoco hay evidencia para garantizar llegar.** Se retira la expectativa de tener el TP completo el 30/10. Primero hace falta un incremento ejecutable, confirmar el plazo y estimar el trabajo restante. Si rige 2/11 y no entra, decirlo y reorganizar con disponibilidad real; si rige 11/11, distribuir el resto tras el teórico con margen de entrega y sin consumir toda la preparación de PCP 16/11 e ISW 17/11.
+**Hay atraso respecto del plan, pero perder el sábado no demuestra por sí solo que la entrega sea inviable. Tampoco hay evidencia para garantizar llegar.** Se retira la expectativa de tener el TP completo el 30/10. Primero hace falta un incremento ejecutable y estimar el trabajo restante. Con entrega confirmada el 11/11 a las 23:59, distribuir el resto tras el teórico con margen para integración, tests, documento y entrega, sin consumir toda la preparación de PCP 16/11 e ISW 17/11. El plan de hoy se mantiene.
 
 ## Secuencia de implementación restante
 
@@ -103,13 +103,13 @@ Diseñar temprano la interacción entre versiones, borrados, TTL, consultas y de
 - [ ] Compilación sin advertencias con `erlc +warn_all`.
 - [ ] Tests observables de todos los comportamientos, incluidos casos concurrentes.
 - [ ] Documento ≤5 páginas: estado, tabla de mensajes, conflictos/borrados, vencimiento, desalojo finito y get sin deadlock.
-- [ ] Canal, plazo y recepción de entrega verificados.
+- [x] Plazo confirmado: 11/11/2026 a las 23:59.
+- [ ] Canal y recepción de entrega verificados.
 
 Pasar tests no reemplaza justificar el diseño.
 
 ## Decisiones pendientes
 
-- Fecha efectiva: 2/11 informado previamente vs 11/11 23:59 impreso.
 - Modalidad/canal de entrega e integrantes y reparto real del trabajo.
 - Interpretación de “12 claves más recientes” ante concurrencia, borrados y vencimiento.
 - Compatibilidad entre convergencia y desalojos locales; tratamiento de metadatos frente al límite de valores.
