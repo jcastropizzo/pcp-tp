@@ -10,7 +10,9 @@ Actualizado al **domingo 25/10/2026, Buenos Aires**. El miércoles 21 se inform�
 - [ ] Implementar el primer comportamiento.
 - [ ] Escribir y ejecutar tests.
 
-Viernes 23 y sábado 24: sin estudio/avance informado. El bloque de PCP del sábado no se hizo. Falta confirmar el avance del jueves y la asistencia a ISW del viernes; no se dan por hechos.
+Jueves 22: hubo algo de ISW, pero no se recuerda qué; avance parcial sin identificar. Viernes 23: no se asistió a ISW y no hubo estudio informado. Sábado 24: no se hizo el bloque de PCP.
+
+Domingo 25: disponibilidad informada de **hasta 5 horas**; se planifican 4 h 15 de trabajo y 45 min de pausas. Ese tiempo es un máximo disponible, no estudio ya realizado.
 
 No hay implementación informada. No se registró tiempo efectivo fiable. No se asume avance de otros integrantes.
 
@@ -30,24 +32,38 @@ No usar behaviours OTP ni una plantilla que introduzca gen_server/supervisor. El
 
 ## Plan hasta el viernes 30/10
 
-Son presupuestos orientativos, no disponibilidad confirmada. El README mantiene el plan del TP; el calendario conserva tareas diarias y check-ins. Cada cierre actualiza el estado real y el siguiente paso. No recuperar atrasos acumulando automáticamente horas nocturnas.
+El domingo tiene hasta cinco horas confirmadas como máximo; el resto son presupuestos orientativos sujetos a disponibilidad real. El README mantiene el plan del TP; el calendario conserva tareas diarias y check-ins. Cada cierre actualiza el estado real y el siguiente paso. No recuperar atrasos acumulando automáticamente horas nocturnas.
 
 | Día | Bloque | Objetivo y criterio de cierre |
 | --- | --- | --- |
 | Mié 21 | Cerrado | Consigna/documentación leídas y herramientas instaladas. Sin implementación. |
-| Jue 22 | Estado sin confirmar | Se había previsto ISW + lectura y merienda; no contar el estudio como realizado. |
-| Vie 23 | Sin estudio informado | No había estudio extra obligatorio. Asistencia a ISW sin confirmar. |
+| Jue 22 | Avance parcial | Se hizo algo de ISW; contenido y resultado por identificar. |
+| Vie 23 | Ausencia confirmada | No se asistió a ISW ni se estudió; recuperar material de la clase. |
 | Sáb 24 | No realizado | Se perdió el bloque de 2 h 30 de PCP. No trasladarlo entero como carga adicional al domingo. |
-| Dom 25 | PCP: 90 min, si hay disponibilidad | 20 min preparar/verificar proyecto; 55 min pedido/respuesta y put/get local; 15 min prueba reproducible y guardar. Cierre: caso local comprobado o bloqueo preciso; no exigir replicación. |
-| Dom 25 | ISW: 45 min | Verificar avance del jueves/asistencia del viernes y atacar una laguna prioritaria para el teórico. Cierre: dos respuestas breves propias contrastadas con el material y pendientes explícitos. |
-| Dom 25 | Cierre: 15 min | Actualizar estado real y preparar consulta concreta para PCP. Total orientativo: 2 h 30 efectivas más pausa de 10–15 min; no disponibilidad confirmada. |
+| Dom 25 | Hasta 5 h incluyendo pausas | Seguir la secuencia detallada debajo: dos bloques PCP, dos ISW, diagnóstico y cierre. Un incremento local y comprensión comprobada de temas seleccionados; no exigir replicación. |
 | Lun 26 | Consulta durante cursada | Destrabar base local o revisar diseño de replicación si ya funciona. Confirmar fecha/modalidad del TP. Repaso ISW de 25 min solo si hay hueco real. |
 | Mar 27 | Sin bloque PCP | ISW y compromisos previstos; confirmar alcance del teórico sin sumar sesión posterior. |
 | Mié 28 | Consulta; hasta 60 min solo si la clase lo permite | Completar base local si falta. Solo después, primera propagación asincrónica entre dos réplicas y prueba sin conflictos. Cierre: incremento comprobado o bloqueo descrito; no fingir que todo el protocolo está resuelto. |
 | Jue 29 | Sin bloque PCP obligatorio | Mantener preparación del teórico ISW (2 h orientativas), usando las lagunas reales del domingo/martes. |
 | Vie 30 | 15 min, si hay hueco real | Rendir ISW; inventario de requisitos pendientes y planificación siguiente según fecha confirmada. Sin implementación pesada después de cursar. |
 
-Si el domingo solo hay **90 min**: 60 min PCP + 25 min ISW + 5 min de cierre. Si hay menos, ajustar al tiempo real. No recuperar atrasos a costa de dormir ni asumir disponible la jornada completa.
+### Sesión del domingo 25 — máximo 5 horas
+
+| Duración | Bloque | Objetivo y criterio de cierre |
+| --- | --- | --- |
+| 15 min | Ubicar el avance de ISW | Revisar archivos, tests, apuntes o chat del jueves y localizar el material de la clase del viernes. Cierre: una lista breve de hecho / pendiente / desconocido. Si no se reconstruye en 15 min, dejarlo como desconocido y seguir. |
+| 75 min | PCP: primer incremento | Preparar/verificar proyecto mínimo, escribir un test observable y construir pedido/respuesta + put/get en una réplica. Consultar solo Erlang necesario. Cierre: código que compile y un intento ejecutable; registrar error concreto si bloquea. Sin behaviours OTP. |
+| 10 min | Pausa | Levantarse y cortar pantalla. |
+| 60 min | ISW: recuperar clase perdida | Calendario del viernes 23: Idioms, introducción a patrones, Decorator, Adapter y Proxy. Localizar material oficial y trabajar uno o dos puntos prioritarios según diagnóstico. Cierre: explicar problema, solución y ejemplo con tus palabras; lista explícita de lo no cubierto. El tema de clase no determina por sí solo todo el alcance del parcialito. |
+| 20 min | Pausa larga | Comer o salir un rato; no contar como estudio. |
+| 60 min | PCP: comprobar y completar | Retomar el mismo incremento, corregir y probar escritura/lectura y clave ausente. Solo si la base queda verde, sumar borrado o cierre de procesos. Cierre: avance guardado, comando/test reproducible, estado de la API y próxima duda de diseño. Replicación no es una obligación hoy. |
+| 15 min | Pausa | Cortar antes del bloque final de ISW. |
+| 30 min | ISW: prueba de comprensión | Responder tres preguntas cortas sin mirar sobre lo estudiado; después contrastar y corregir. Respuesta directa + justificación, 2–4 oraciones. Cierre: dudas concretas para el martes; no contar una lectura como dominio. |
+| 15 min | Cierre | Actualizar README y check-in: código/tests que funcionan, ayuda recibida, temas de ISW comprendidos, pendientes y siguiente paso. No seguir agregando funciones. |
+
+**Total: 4 h 15 efectivas y 45 min de pausas.** No hay horario fijo de inicio. Si baja la energía después de la pausa larga, reducir el segundo bloque PCP a 30 min, usar 10 min de pausa entre materias y conservar ISW + cierre: total 4 h 25 incluyendo descansos. Si hay saturación antes, guardar el estado real y anotar lo pendiente. No agregar tareas por haber tenido hasta cinco horas disponibles.
+
+La clase perdida del viernes contenía, según calendario oficial, Idioms, introducción a patrones, Decorator, Adapter y Proxy. Esto orienta la recuperación; el alcance del parcialito debe confirmarse con la cátedra. El viernes 30 sigue anunciado el parcialito en los primeros 30 minutos de la clase de las 17.
 
 **Hay atraso respecto del plan, pero perder el sábado no demuestra por sí solo que la entrega sea inviable. Tampoco hay evidencia para garantizar llegar.** Se retira la expectativa de tener el TP completo el 30/10. Primero hace falta un incremento ejecutable, confirmar el plazo y estimar el trabajo restante. Si rige 2/11 y no entra, decirlo y reorganizar con disponibilidad real; si rige 11/11, distribuir el resto tras el teórico con margen de entrega y sin consumir toda la preparación de PCP 16/11 e ISW 17/11.
 
