@@ -28,8 +28,7 @@ get(Pid, Key) ->
         {Ref, not_found} -> not_found
     end.
 
-delete(Pid, Key)
-->
+delete(Pid, Key) ->
     Ref = make_ref(),
     Pid ! {delete, self(), Ref, Key},
     receive
@@ -56,12 +55,16 @@ loop(Map) ->
                     Client ! {Ref, not_found}
             end,
             loop(Map);
-        _ -> loop(Map)
+        _ ->
+            loop(Map)
     end.
 
-start_link(1) ->
-    Pid = spawn_link(fun() -> loop(#{}) end),
-    {ok, [Pid]}.
+start_link(N) when is_integer(N), N >= 1 ->
+    Pids = lists:map(
+        fun(_) -> spawn_link(fun() -> loop(#{}) end) end,
+        lists:seq(1, N)
+    ),
+    {ok, Pids}.
 
 stop(Pids) ->
     lists:foreach(
