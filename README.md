@@ -74,6 +74,19 @@ El trabajo continúa dentro de los bloques ya previstos; no se agrega una sesió
 
 No usar behaviours OTP ni una plantilla que introduzca gen_server/supervisor. El resto de las restricciones está en el checklist. Consultar teoría puntual cuando bloquee el siguiente paso.
 
+## Sesión del lunes 26/10 — dos horas disponibles
+
+Ausencia a PCP informada por obligaciones personales. El calendario identifica la clase como «Teórica», sin tema concreto: contenido por identificar; trabajar en el TP no cuenta como recuperar esa clase. La sesión está **planificada, todavía sin resultados**.
+
+| Duración | Objetivo | Criterio de cierre |
+| --- | --- | --- |
+| 50 min PCP | Recompilar y ejecutar los seis tests; validar `start_link(N)` con múltiples procesos y argumentos inválidos. Si sobra tiempo, empezar a comprobar terminación en `stop/1`. | Resultados reales guardados o bloqueo reproducible. Sin exigir replicación. |
+| 10 min | Pausa. | Descanso fuera del bloque efectivo. |
+| 50 min ISW | Máximo 10 min para ubicar alcance del parcialito y elegir un pendiente. Si no se confirma, 30 min de Method Lookup y `super` como preparación para la clase del martes, sin asumir que entren en el examen. Últimos 10 min: dos ejercicios/respuestas sin ayuda y corrección. | Tema y fuente identificados, producción propia y dudas concretas. No repetir indefinidamente patrones ya validados. |
+| 10 min | Cierre y check-in. | Evidencia, ayuda, tiempos medidos, bloqueos y próximo paso. |
+
+**Total: 110 min efectivos + 10 min de pausa.** Esta disponibilidad reemplaza la consulta en clase y el repaso opcional del lunes; no añade horas compensatorias. El resto de la planificación se conserva. El tutor prepara el check-in; el agente de planificación mantiene el README y calendario.
+
 ## Plan hasta el viernes 30/10
 
 Se conserva el plan acordado, con sus presupuestos y pausas; la ejecución real del domingo está registrada arriba. Los bloques del domingo que siguen describen lo previsto, no horas adicionales ni tareas para repetir. El resto está sujeto a disponibilidad real. El README mantiene el plan del TP; el calendario conserva tareas diarias y check-ins. Cada cierre actualiza el estado real y el siguiente paso. No recuperar atrasos acumulando automáticamente horas nocturnas.
@@ -85,7 +98,7 @@ Se conserva el plan acordado, con sus presupuestos y pausas; la ejecución real 
 | Vie 23 | Ausencia confirmada | No se asistió a ISW ni se estudió; recuperar material de la clase. |
 | Sáb 24 | No realizado | Se perdió el bloque de 2 h 30 de PCP. No trasladarlo entero como carga adicional al domingo. |
 | Dom 25 | Hasta 5 h incluyendo pausas | Seguir la secuencia detallada debajo: dos bloques PCP, dos ISW, diagnóstico y cierre. Un incremento local y comprensión comprobada de temas seleccionados; no exigir replicación. |
-| Lun 26 | Consulta durante cursada | Destrabar base local o revisar diseño de replicación si ya funciona. Confirmar modalidad/canal de entrega del TP. Repaso ISW de 25 min solo si hay hueco real. |
+| Lun 26 | Ausencia; sesión de 2 h | Sesión detallada arriba: 50 min PCP + 10 pausa + 50 ISW + 10 cierre. Sustituye consultas previstas en clase; la teórica perdida queda pendiente de identificar. |
 | Mar 27 | Sin bloque PCP | ISW y compromisos previstos; confirmar alcance del teórico sin sumar sesión posterior. |
 | Mié 28 | Consulta; hasta 60 min solo si la clase lo permite | Completar base local si falta. Solo después, primera propagación asincrónica entre dos réplicas y prueba sin conflictos. Cierre: incremento comprobado o bloqueo descrito; no fingir que todo el protocolo está resuelto. |
 | Jue 29 | Sin bloque PCP obligatorio | Mantener preparación del teórico ISW (2 h orientativas), usando las lagunas reales del domingo/martes. |
