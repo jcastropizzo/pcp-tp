@@ -13,6 +13,11 @@ leer_devuelve_not_found_test()->
     ?assertEqual(not_found, simple_kv:get(Pid, color)),
     simple_kv:stop([Pid]).
 
+escribir_con_tiempo_negativo_devuelve_error_test()->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    ?assertError(function_clause, simple_kv:put(Pid, color, rojo, -1)),
+    simple_kv:stop([Pid]).
+
 escribir_leer_borrar_y_leer_devuelve_not_found_test()->
     {ok, [Pid]} = simple_kv:start_link(1),
     ok = simple_kv:put(Pid, color, rojo),
