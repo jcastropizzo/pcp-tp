@@ -2,19 +2,57 @@
 
 ## Estado actual
 
-Actualizado al **domingo 25/10/2026, Buenos Aires**. El miércoles 21 se informó:
-- [x] Leer la consigna.
-- [x] Leer documentación de una clase de Erlang para recuperar conceptos.
-- [x] Instalar Erlang CLI y rebar3.
-- [ ] Crear y verificar el proyecto ejecutable.
-- [ ] Implementar el primer comportamiento.
-- [ ] Escribir y ejecutar tests.
+Actualizado al cierre de la sesión del **domingo 25/10/2026, Buenos Aires**. Energía final: **alta**.
 
-Jueves 22: hubo algo de ISW, pero no se recuerda qué; avance parcial sin identificar. Viernes 23: no se asistió a ISW y no hubo estudio informado. Sábado 24: no se hizo el bloque de PCP.
+- [x] Consigna leída y herramientas Erlang CLI/rebar3 instaladas.
+- [x] Primer incremento local implementado en `simple_kv`.
+- [x] Seis tests EUnit aprobados y compilación con `erlc +warn_all` sin advertencias, **antes del último cambio en `start_link/1`**, según el check-in.
+- [ ] Compilar y probar nuevamente el último `start_link(N)`, incluidos múltiples procesos y argumentos inválidos.
+- [ ] Comprobar que `stop/1` espera la terminación efectiva de todos los procesos.
+- [ ] Completar TTL, replicación y demás requisitos del TP.
 
-Domingo 25: disponibilidad informada de **hasta 5 horas**; se planifican 4 h 15 de trabajo y 45 min de pausas. Ese tiempo es un máximo disponible, no estudio ya realizado.
+### PCP: implementación y evidencia
 
-No hay implementación informada. No se registró tiempo efectivo fiable. No se asume avance de otros integrantes.
+Se implementaron `put/3`, `put/4`, `get/2` y `delete/2`, con estado en un mapa y ciclo `receive`. Los pedidos y respuestas usan referencias de `make_ref/0`. Hay un `stop/1` provisional y descarte de mensajes inesperados en el ciclo principal. Tener `put/4` no significa que la expiración de TTL esté implementada.
+
+Los **6/6 tests aprobados antes de la última modificación** cubrieron:
+1. Escritura y lectura local.
+2. Lectura de clave inexistente.
+3. Escritura, borrado y lectura posterior.
+4. Borrado de clave inexistente.
+5. Continuidad después de un mensaje desconocido.
+6. TTL negativo produce `function_clause`.
+
+La generalización final de `start_link(N)` quedó pendiente de compilación y prueba. El éxito de los seis tests anteriores **no valida ese último cambio**, la concurrencia ni los requisitos distribuidos.
+
+**Publicación verificada por el agente de planificación:** en [`983fa40`](https://github.com/jcastropizzo/pcp-tp/commit/983fa40ccb34a6477e6359550c067aaf302f1de9) están [`src/simple_kv.erl`](src/simple_kv.erl), [`test/simple_kv_tests.erl`](test/simple_kv_tests.erl) y el cambio a `start_link(N)`. El check-in original solo informaba commits locales; la lectura de GitHub resolvió esa incertidumbre. Esta actualización documental no volvió a ejecutar compilación ni tests.
+
+Pendientes: validar `start_link(N)` y argumentos inválidos; terminación efectiva en `stop/1`; expiración de TTL; replicación asincrónica y conflictos; prevención de resurrección; lecturas remotas sin deadlock; capacidad y desalojo; tests concurrentes y casos límite; descarte de mensajes inesperados en todos los puntos de recepción; documento de diseño de máximo cinco páginas.
+
+### ISW: recuperación y autonomía
+
+Se trabajaron **Idioms, introducción a patrones, Decorator, Adapter y Proxy**. Validación: **3/3 preguntas correctas, respondidas autónomamente y sin pistas**, según el check-in.
+
+Se pudo identificar y combinar Decorator/Proxy, justificar el orden de composición, reconocer Adapter y explicar el desacoplamiento de interfaces externas, y distinguir idioms de patrones. Durante el aprendizaje hubo correcciones en Proxy/Decorator en casos ambiguos, herencia/composición y terminología de acoplamiento.
+
+No se encontró material específico de la cátedra para contrastar las definiciones. Esto registra recuperación concreta y desempeño sobre las preguntas trabajadas; **no certifica toda la clase ni todo el alcance del parcialito**. El parcialito sigue previsto para el **30/10 a las 17:00**; falta confirmar su alcance completo.
+
+### Tiempo y balance
+
+| Bloque | Registro |
+| --- | --- |
+| Reconstrucción ISW | Aproximadamente 2 min, no cronometrados; excluidos del mínimo confirmado. |
+| PCP inicial | 75 min cronometrados. |
+| Recuperación ISW | 60 min cronometrados. |
+| PCP: comprobación | 60 min cronometrados. |
+| Validación ISW | 12 min al último control; cierre anticipado, duración final podría ser ligeramente mayor. |
+| Cierre | Sin medición registrada. |
+
+**Mínimo efectivo confirmado: 207 min (3 h 27 min)**, sin descansos ni estimaciones. No se equipara la disponibilidad de cinco horas con tiempo estudiado.
+
+Se alcanzaron ambos objetivos de la sesión: incremento local comprobable y recuperación concreta de ISW. El TP sigue incompleto. Se conserva la planificación y **no se agregan horas compensatorias**.
+
+Contexto previo: jueves 22 hubo algo de ISW sin identificar; viernes 23 no se asistió ni se estudió; sábado 24 no se realizó el bloque PCP. La sesión del domingo no se cuenta como recuperación automática de todos esos pendientes.
 
 ## Consigna y fecha
 
@@ -26,13 +64,19 @@ Entregar implementación `.erl`, tests propios y documento de diseño de **máxi
 
 ## Primer paso concreto
 
-En la próxima sesión de PCP: abrir este repo, preparar una estructura mínima que compile y escribir el primer test observable para una réplica. Implementar pedido/respuesta correlacionado y put/get local con estado en argumentos de un ciclo receive. Es un incremento inicial; todavía no cumple el TP completo.
+**Verificar `start_link(N)` con tests incrementales antes de avanzar a replicación.** Partir del código existente, no volver a crear el proyecto.
 
-No usar behaviours OTP ni una plantilla que introduzca gen_server/supervisor. El resto de las restricciones está en el checklist. Consultar teoría puntual cuando bloquee el siguiente paso, sin convertir toda la sesión en lectura general.
+1. Recompilar el último cambio con `erlc +warn_all` y volver a ejecutar los seis tests.
+2. Añadir comprobaciones de múltiples procesos y de argumentos inválidos.
+3. Registrar resultados reales; mantener pendiente comprobar terminación efectiva en `stop/1`.
+
+El trabajo continúa dentro de los bloques ya previstos; no se agrega una sesión por haber terminado con energía alta. Para ISW, conservar la preparación del parcialito y confirmar el alcance completo; no repetir indefinidamente las preguntas ya validadas.
+
+No usar behaviours OTP ni una plantilla que introduzca gen_server/supervisor. El resto de las restricciones está en el checklist. Consultar teoría puntual cuando bloquee el siguiente paso.
 
 ## Plan hasta el viernes 30/10
 
-El domingo tiene hasta cinco horas confirmadas como máximo; el resto son presupuestos orientativos sujetos a disponibilidad real. El README mantiene el plan del TP; el calendario conserva tareas diarias y check-ins. Cada cierre actualiza el estado real y el siguiente paso. No recuperar atrasos acumulando automáticamente horas nocturnas.
+Se conserva el plan acordado, con sus presupuestos y pausas; la ejecución real del domingo está registrada arriba. Los bloques del domingo que siguen describen lo previsto, no horas adicionales ni tareas para repetir. El resto está sujeto a disponibilidad real. El README mantiene el plan del TP; el calendario conserva tareas diarias y check-ins. Cada cierre actualiza el estado real y el siguiente paso. No recuperar atrasos acumulando automáticamente horas nocturnas.
 
 | Día | Bloque | Objetivo y criterio de cierre |
 | --- | --- | --- |
@@ -65,7 +109,7 @@ El domingo tiene hasta cinco horas confirmadas como máximo; el resto son presup
 
 La clase perdida del viernes contenía, según calendario oficial, Idioms, introducción a patrones, Decorator, Adapter y Proxy. Esto orienta la recuperación; el alcance del parcialito debe confirmarse con la cátedra. El viernes 30 sigue anunciado el parcialito en los primeros 30 minutos de la clase de las 17.
 
-**Hay atraso respecto del plan, pero perder el sábado no demuestra por sí solo que la entrega sea inviable. Tampoco hay evidencia para garantizar llegar.** Se retira la expectativa de tener el TP completo el 30/10. Primero hace falta un incremento ejecutable y estimar el trabajo restante. Con entrega confirmada el 11/11 a las 23:59, distribuir el resto tras el teórico con margen para integración, tests, documento y entrega, sin consumir toda la preparación de PCP 16/11 e ISW 17/11. El plan de hoy se mantiene.
+**Hay atraso respecto del plan, pero perder el sábado no demuestra por sí solo que la entrega sea inviable. Tampoco hay evidencia para garantizar llegar.** Se retira la expectativa de tener el TP completo el 30/10. El primer incremento local ya se logró; resta validar la última modificación y estimar el trabajo pendiente. Con entrega confirmada el 11/11 a las 23:59, distribuir el resto tras el teórico con margen para integración, tests, documento y entrega, sin consumir toda la preparación de PCP 16/11 e ISW 17/11. No se agregan horas compensatorias.
 
 ## Secuencia de implementación restante
 
@@ -85,9 +129,9 @@ Diseñar temprano la interacción entre versiones, borrados, TTL, consultas y de
 ## Checklist del alcance
 
 - [ ] API exacta y claves/valores arbitrarios de Erlang.
-- [ ] Count inválido y TTL inválido fallan con function_clause; TTL falla en el invocante.
+- [ ] Count inválido y todos los TTL inválidos fallan con function_clause; TTL falla en el invocante. Parcial: probado TTL negativo antes del último cambio; Count y demás casos pendientes.
 - [ ] Procesos enlazados al invocante; stop espera terminación de todos.
-- [ ] put/3 equivale a TTL infinito; delete inexistente es válido.
+- [ ] put/3 equivale a TTL infinito; delete inexistente es válido. Parcial: delete de clave inexistente probado; expiración y semántica completa de TTL pendientes.
 - [ ] Replicación asincrónica de cambios y consistencia eventual.
 - [ ] Política de conflictos determinista respecto del orden de recepción y justificada.
 - [ ] Borrados sin resurrección por escrituras antiguas.
@@ -96,11 +140,11 @@ Diseñar temprano la interacción entre versiones, borrados, TTL, consultas y de
 - [ ] Desalojo distinto de borrado; ofrecimiento a otras réplicas; intercambio finito.
 - [ ] Lectura sin información local considera otras réplicas.
 - [ ] Esperas remotas no bloquean atención de pedidos; ausencia de deadlock.
-- [ ] Respuestas correlacionadas y descarte de mensajes inesperados.
+- [ ] Respuestas correlacionadas y descarte de mensajes inesperados. Parcial: referencias implementadas y mensaje desconocido probado en el ciclo principal; revisar todos los puntos de recepción.
 - [ ] Tests contemplan falta de orden global entre emisores.
 - [ ] Sin behaviours OTP, ets/dets/mnesia/persistent_term ni diccionario de proceso.
 - [ ] Estado exclusivamente en argumentos del ciclo de recepción.
-- [ ] Compilación sin advertencias con `erlc +warn_all`.
+- [ ] Última versión compilada sin advertencias con `erlc +warn_all`. La versión anterior al cambio final en `start_link/1` sí compiló limpia, según el check-in.
 - [ ] Tests observables de todos los comportamientos, incluidos casos concurrentes.
 - [ ] Documento ≤5 páginas: estado, tabla de mensajes, conflictos/borrados, vencimiento, desalojo finito y get sin deadlock.
 - [x] Plazo confirmado: 11/11/2026 a las 23:59.
