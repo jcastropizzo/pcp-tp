@@ -26,3 +26,10 @@ borrar_clave_inexistente_devuelve_ok_test()->
     ?assertEqual(ok, simple_kv:delete(Pid, color)),
     simple_kv:stop([Pid]).
 
+mensaje_desconocido_es_ignorado_test()->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    Pid ! {mensaje_desconocido123, a, 123},
+    ok = simple_kv:put(Pid, color, rojo),
+    {ok, ColorVal} = simple_kv:get(Pid, color),
+    ?assertEqual(rojo, ColorVal),
+    simple_kv:stop([Pid]).
