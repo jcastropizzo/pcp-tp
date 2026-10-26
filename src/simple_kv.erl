@@ -55,7 +55,8 @@ loop(Map) ->
                 error ->
                     Client ! {Ref, not_found}
             end,
-            loop(Map)
+            loop(Map);
+        _ -> loop(Map)
     end.
 
 start_link(1) ->
