@@ -2,7 +2,9 @@
 
 ## Estado actual
 
-Cierre del **lunes 26/10/2026, Buenos Aires**. Energía final: **media a baja**. Se cerró al resolver correctamente los dos ejercicios finales, sin consumir los 15 minutos restantes ni agregar compensación.
+Cierre del **miércoles 28/10/2026, Buenos Aires**. Energía final: **media**, con malestar tras comer. Se cerró anticipadamente, sin consumir los 10 minutos restantes. El martes no se estudió; asistencia a cursada sin confirmar. No se agregan horas compensatorias.
+
+**PCP no se trabajó el miércoles:** no se inspeccionó código local, no hubo cambios ni comandos/tests ejecutados. El estado y la evidencia técnica siguientes corresponden al lunes y permanecen sin cambios.
 
 ### PCP: avance y nivel de evidencia
 
@@ -12,7 +14,7 @@ Cierre del **lunes 26/10/2026, Buenos Aires**. Energía final: **media a baja**.
 - [ ] Revisar la decisión de timeout de un segundo por PID y probar su camino de error.
 - [ ] TTL, replicación y demás requisitos del TP.
 
-**Evidencia completa disponible en la sesión:** salida de compilación sin advertencias y EUnit **11/11 antes de modificar stop/1**. Para la versión final de stop y sus tests, el alumno informó que pasan todos, pero no pegó una nueva salida completa. No se informaron modificaciones posteriores a esa ejecución. El test final comprueba que los procesos estén muertos inmediatamente al retornar stop, sin espera adicional en el test.
+**Evidencia completa disponible de la sesión del lunes:** salida de compilación sin advertencias y EUnit **11/11 antes de modificar stop/1**. Para la versión final de stop y sus tests, el alumno informó que pasan todos, pero no pegó una nueva salida completa. No se informaron modificaciones posteriores a esa ejecución. El test final comprueba que los procesos estén muertos inmediatamente al retornar stop, sin espera adicional en el test.
 
 El timeout de un segundo por PID lanza `error(timeout)`: es una decisión de implementación, **no un requisito de la consigna**, y ese camino no fue probado. No marcar el cierre como completamente validado ni confundir estos tests con corrección concurrente general.
 
@@ -34,9 +36,17 @@ Dificultades iniciales: confundir la clase que define el método con el receptor
 
 Precisiones a consolidar: super conserva el receptor y cambia dónde empieza la búsqueda; no “es la superclase”. `doesNotUnderstand:` es un mensaje enviado, no el valor devuelto. No repetir indefinidamente ejercicios equivalentes ya superados.
 
-Parcialito: **viernes 30/10 a las 17:00**. Próxima prioridad: consultar el alcance en la cursada del martes 27.
+El miércoles se trabajó **Visitor** con el [capítulo de Design Patterns alojado en MIT](https://people.csail.mit.edu/addy/pattern/pat5k.htm), elegido por el alumno como fuente externa al no encontrar material específico en el repo ISW. Se abordaron separación de operaciones, participantes, aceptar/visitas específicas, double dispatch, recorrido, encapsulamiento y costos de agregar operaciones frente a tipos. Ejemplo: documento con Texto, Imagen y Tabla; visitantes de estadísticas y HTML. También se revisó Decorator frente a métodos por combinación.
+
+Autonomía: propuso separar la operación y usar double dispatch, escribió `Texto » aceptar:`, explicó extensiones, propuso el recorrido del documento y reconstruyó mensajes. Corrigió un error de copia en visitarImagen. Necesitó preguntas orientadoras para explicar propósito y conveniencia; se precisó que no hace falta una superclase común y que agregar tipos requiere revisar visitantes.
+
+**Validación final del miércoles: 3/3 sin pistas.** Reconoció que visitar: self no despacha automáticamente por tipo del argumento; compuso cliente → Proxy de acceso → Adapter → biblioteca; resolvió 15 con self/super. El tutor completó la explicación de lookup y explicitó responsabilidades: no atribuir esas ampliaciones a producción autónoma. Pendiente verbal: decir “la búsqueda comienza en X”, conservando receptor, en lugar de “super es X”.
+
+Parcialito: **viernes 30/10 a las 17:00**. Prioridad: confirmar alcance docente y preparar contenidos confirmados pendientes. **Visitor, Fail Fast y Pattern Abuser siguen sin inclusión confirmada.** No confundir haber trabajado Visitor con haber cubierto el temario.
 
 ### Tiempo y balance
+
+- Miércoles: plan de 150 min recortado por interrupciones y menor disponibilidad. **Tiempo efectivo no determinable**: hubo estimación de ~30 min y un temporizador, pero no medición fiable sin interrupciones. Los 15 min disponibles antes de validar y 10 al cierre no son una medición independiente. No registrar 140 ni 150 min como realizados.
 
 - Domingo: mínimo registrado **207 min efectivos**, con energía final alta.
 - Lunes PCP: **aproximadamente 50 min**, desglosados en 35 medidos y 15 estimados.
@@ -55,7 +65,7 @@ Entregar implementación `.erl`, tests propios y documento de diseño de **máxi
 
 ## Primer paso concreto
 
-**ISW:** consultar en la próxima cursada el alcance del parcialito del 30/10. Mantener la preparación prevista y usar las precisiones de self/super como repaso breve.
+**ISW:** confirmar el alcance docente del parcialito del 30/10 y priorizar contenido confirmado pendiente. Mantener el jueves para ISW; Visitor ya fue trabajado y self/super solo requiere precisión verbal salvo errores nuevos.
 
 **PCP:** partir de la versión local final del lunes. Conservar/identificar esa versión y registrar la salida de la suite al retomar; después abordar incrementalmente **TTL 0 y expiración positiva**, según la consigna. Mantener el timeout de stop como decisión pendiente de revisión, sin considerar el cierre definitivamente validado. No reiniciar el proyecto ni repetir toda la validación de start_link como si no se hubiera hecho.
 
@@ -86,9 +96,9 @@ Se conserva el plan acordado, con sus presupuestos y pausas; la ejecución real 
 | Sáb 24 | No realizado | Se perdió el bloque de 2 h 30 de PCP. No trasladarlo entero como carga adicional al domingo. |
 | Dom 25 | Hasta 5 h incluyendo pausas | Seguir la secuencia detallada debajo: dos bloques PCP, dos ISW, diagnóstico y cierre. Un incremento local y comprensión comprobada de temas seleccionados; no exigir replicación. |
 | Lun 26 | Ausencia; sesión de 2 h | Sesión detallada arriba: 50 min PCP + 10 pausa + 50 ISW + 10 cierre. Sustituye consultas previstas en clase; la teórica perdida queda pendiente de identificar. |
-| Mar 27 | Sin bloque PCP | ISW y compromisos previstos; confirmar alcance del teórico sin sumar sesión posterior. |
-| Mié 28 | Consulta; hasta 60 min solo si la clase lo permite | Partir de versión local del lunes; abordar TTL 0 y expiración positiva con tests. Consultar timeout de stop y contenido de teórica perdida. Cierre: resultados reales o bloqueo concreto; sin agregar horas. |
-| Jue 29 | Sin bloque PCP obligatorio | Mantener preparación del teórico ISW (2 h orientativas), usando las lagunas reales del domingo/martes. |
+| Mar 27 | Sin estudio | Informado por el alumno. Asistencia a cursada sin confirmar; alcance del parcialito no resuelto. |
+| Mié 28 | Sesión cerrada; plan de 150 min recortado | Visitor trabajado y validación ISW 3/3 sin pistas; tiempo efectivo desconocido. PCP no realizado, TTL pendiente. No trasladar automáticamente el bloque omitido. |
+| Jue 29 | Sin bloque PCP obligatorio | Mantener preparación del teórico ISW (2 h orientativas), priorizando alcance confirmado pendiente y errores reales; no repetir Visitor o self/super desde cero. |
 | Vie 30 | 15 min, si hay hueco real | Rendir ISW; inventario de requisitos pendientes y planificación siguiente hacia la entrega del 11/11. Sin implementación pesada después de cursar. |
 
 ### Sesión del domingo 25 — máximo 5 horas
