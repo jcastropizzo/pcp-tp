@@ -2,9 +2,9 @@
 
 ## Estado actual
 
-Cierre del **miércoles 28/10/2026, Buenos Aires**. Energía final: **media**, con malestar tras comer. Se cerró anticipadamente, sin consumir los 10 minutos restantes. El martes no se estudió; asistencia a cursada sin confirmar. No se agregan horas compensatorias.
+Cierre del **jueves 29/10/2026, Buenos Aires**. Energía final: **media-alta**. Check-in reportado por el tutor y aportado por el alumno; planificación no reejecutó las evaluaciones.
 
-**PCP no se trabajó el miércoles:** no se inspeccionó código local, no hubo cambios ni comandos/tests ejecutados. El estado y la evidencia técnica siguientes corresponden al lunes y permanecen sin cambios.
+La sesión del jueves fue de ISW. No se reportan cambios de PCP ni pruebas nuevas; se conserva la evidencia técnica del lunes. No se agregan horas compensatorias.
 
 ### PCP: avance y nivel de evidencia
 
@@ -42,9 +42,30 @@ Autonomía: propuso separar la operación y usar double dispatch, escribió `Tex
 
 **Validación final del miércoles: 3/3 sin pistas.** Reconoció que visitar: self no despacha automáticamente por tipo del argumento; compuso cliente → Proxy de acceso → Adapter → biblioteca; resolvió 15 con self/super. El tutor completó la explicación de lookup y explicitó responsabilidades: no atribuir esas ampliaciones a producción autónoma. Pendiente verbal: decir “la búsqueda comienza en X”, conservando receptor, en lugar de “super es X”.
 
-Parcialito: **viernes 30/10 a las 17:00**. Prioridad: confirmar alcance docente y preparar contenidos confirmados pendientes. **Visitor, Fail Fast y Pattern Abuser siguen sin inclusión confirmada.** No confundir haber trabajado Visitor con haber cubierto el temario.
+### ISW: check-in del jueves 29/10
+
+**Alcance docente según fuentes consultadas por el tutor:** Alan Kay confirmado para el viernes; Fail Fast excluido y Pattern Abuser asignado al recuperatorio. Las conclusiones de *Cultures* se dieron el 20/10: eso confirma su tratamiento en cursada, no por sí solo su inclusión en el examen. Sigue sin temario completo confirmado. Visitor, Active Variables y Farley estudiados preventivamente; Observer y Composite validados por su relación con ejercicios de cursada.
+
+Fuentes reportadas: calendario oficial, mails docentes, Alan Kay completo y apartados 7.7–7.8 de *Cultures* aportados por el alumno, PDF de Active Variables y traducción de Farley. El agente de planificación registra este reporte sin atribuirse verificación independiente de esas fuentes.
+
+- **Active Variables:** mecanismo, sincronización, ciclos y transparencia comprendidos. Corrección necesaria: las excepciones no revierten una asignación; validación posterior correcta.
+- **Kay:** buena comprensión de formación versus mercado y contrastación empírica; ayuda para distinguir experimentación de inducción matemática.
+- **Cultures:** marco general y 7.7–7.8 trabajados; capítulo de conclusiones parcialmente cubierto. Ayuda en intercambio activo entre culturas, límites de la especificación formal y modificación por usuarios comunes.
+- **Farley, capítulos 1–3:** autonomía en control de variables, acoplamiento y aprendizaje; ayuda en incremento versus publicación, causalidad y calidad técnica versus utilidad.
+- **Simulacro:** tres respuestas autónomas conceptualmente correctas, con algunas justificaciones explícitas faltantes. No acredita cobertura completa del examen.
+- **Method lookup/self/super:** caso nuevo autónomo correcto; receptor conservado y comienzo de búsqueda bien identificados. La precisión pendiente anterior quedó validada en este caso.
+- **Composite:** propósito precisado con ayuda; extensión mediante protocolo común validada después.
+- **Observer:** colaboración, nuevos suscriptores y desuscripción autónomos.
+
+Próximo foco: respuestas breves con **concepto + justificación concreta**; no todas las distinciones corregidas tuvieron validación diferida. Sin reiniciar temas ya validados.
+
+**Examen viernes 30/10, 17:00–17:30**, presencial en aula habitual, DNI y birome, sin dispositivos: reportado confirmado por calendario y recordatorio docente del 29/10. Número de aula pendiente de revalidar.
+
+**Consulta de corrección práctica:** sigue sin confirmar si hay alguna pendiente. Mail del 27/10: tres días hábiles posteriores a recepción mediante formulario; no se envió nada. Revisar antes del vencimiento, sin asumir que el envío sea necesario. [Formulario práctico](https://forms.gle/8PoUeSLpfMo2saXn7).
 
 ### Tiempo y balance
+
+- Jueves: disponibilidad confirmada de 3 h incluyendo pausas; bloques de 35, 30 y 25 min reportados completos, pausa de 10 min confirmada y comida intermedia. Otros temporizadores/interrupciones no identificados con precisión; distracciones y película de fondo. **Sin total efectivo fiable**: no registrar las 3 h ni la suma de bloques como tiempo efectivo medido. Energía final media-alta.
 
 - Miércoles: plan de 150 min recortado por interrupciones y menor disponibilidad. **Tiempo efectivo no determinable**: hubo estimación de ~30 min y un temporizador, pero no medición fiable sin interrupciones. Los 15 min disponibles antes de validar y 10 al cierre no son una medición independiente. No registrar 140 ni 150 min como realizados.
 
@@ -65,7 +86,7 @@ Entregar implementación `.erl`, tests propios y documento de diseño de **máxi
 
 ## Primer paso concreto
 
-**ISW:** confirmar el alcance docente del parcialito del 30/10 y priorizar contenido confirmado pendiente. Mantener el jueves para ISW; Visitor ya fue trabajado y self/super solo requiere precisión verbal salvo errores nuevos.
+**ISW:** rendir el viernes 30/10 a las 17:00. Revalidar número de aula y resolver si hay consulta práctica pendiente. Solo con disponibilidad real, repaso breve de concepto + justificación y distinciones corregidas; conclusiones de Cultures parcialmente cubiertas. No imponer otra sesión pesada.
 
 **PCP:** partir de la versión local final del lunes. Conservar/identificar esa versión y registrar la salida de la suite al retomar; después abordar incrementalmente **TTL 0 y expiración positiva**, según la consigna. Mantener el timeout de stop como decisión pendiente de revisión, sin considerar el cierre definitivamente validado. No reiniciar el proyecto ni repetir toda la validación de start_link como si no se hubiera hecho.
 
@@ -98,7 +119,7 @@ Se conserva el plan acordado, con sus presupuestos y pausas; la ejecución real 
 | Lun 26 | Ausencia; sesión de 2 h | Sesión detallada arriba: 50 min PCP + 10 pausa + 50 ISW + 10 cierre. Sustituye consultas previstas en clase; la teórica perdida queda pendiente de identificar. |
 | Mar 27 | Sin estudio | Informado por el alumno. Asistencia a cursada sin confirmar; alcance del parcialito no resuelto. |
 | Mié 28 | Sesión cerrada; plan de 150 min recortado | Visitor trabajado y validación ISW 3/3 sin pistas; tiempo efectivo desconocido. PCP no realizado, TTL pendiente. No trasladar automáticamente el bloque omitido. |
-| Jue 29 | Sin bloque PCP obligatorio | Mantener preparación del teórico ISW (2 h orientativas), priorizando alcance confirmado pendiente y errores reales; no repetir Visitor o self/super desde cero. |
+| Jue 29 | Sesión ISW cerrada; 3 h disponibles | Check-in arriba: simulacro 3 respuestas autónomas correctas con justificaciones incompletas; nuevas distinciones trabajadas, total efectivo desconocido. Energía media-alta. Sin bloque PCP obligatorio. |
 | Vie 30 | 15 min, si hay hueco real | Rendir ISW; inventario de requisitos pendientes y planificación siguiente hacia la entrega del 11/11. Sin implementación pesada después de cursar. |
 
 ### Sesión del domingo 25 — máximo 5 horas
