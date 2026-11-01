@@ -121,3 +121,15 @@ ttl_anterior_vencido_no_modifica_entrada_test() ->
     after
         simple_kv:stop([Pid])
     end.
+
+ttl_infinito_sobrescrito_con_finito_vence_entrada_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    try
+        ok = simple_kv:put(Pid, color, rojo),
+        ok = simple_kv:put(Pid, color, azul,1000),
+        ?assertEqual({ok, azul}, simple_kv:get(Pid, color)),
+        timer:sleep(1100),
+        ?assertEqual(not_found, simple_kv:get(Pid, color))
+    after
+        simple_kv:stop([Pid])
+    end.
