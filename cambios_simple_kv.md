@@ -279,28 +279,6 @@ get(P1, k).            %% not_found, no 'viejo'
 
 Si no se guardara, `get` devolvería `viejo`, que es incorrecto.
 
-### TTL inválido
-
-La validación está en el guard de `put/4`, que ya existía:
-
-```erlang
-put(Pid, Key, Val, Time) when
-    is_integer(Time), Time >= 0; Time =:= infinity
-```
-
-En un guard, `,` significa "y" y `;` significa "o". Si `Time` no cumple, no hay cláusula que encaje y Erlang lanza `function_clause` en el proceso que llama, como pide el enunciado.
-
-### ¿Por qué no `after`?
-
-El `after` de `receive` sirve para hacer algo si no llega ningún mensaje en cierto tiempo. Podría usarse para limpiar vencidos, pero **no alcanza solo**:
-
-1. **Se reinicia con cada mensaje.** Si la réplica recibe pedidos todo el tiempo, el `after` puede no dispararse nunca.
-2. **Hay una carrera.** Si un `get` llega justo después del vencimiento pero antes de que se ejecute el `after`, se atiende primero el `get`. Sin el chequeo al leer, se devolvería un valor vencido.
-
-El chequeo al leer es obligatorio igual. El `after` solo serviría para liberar memoria, y no hace falta para cumplir el 4.6.
-
----
-
 ## 7. Lo que todavía no está implementado
 
 - **4.7, capacidad y desalojo:** el límite de 16 valores no se controla.
