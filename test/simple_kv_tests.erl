@@ -144,6 +144,23 @@ escribir_en_p1_replica_leer_en_p2_test()->
     end.
 
 
+borrar_en_p2_replica_en_otras_test()->
+    {ok, Pids} = simple_kv:start_link(3),
+    [Pid1, Pid2, Pid3] = Pids,
+    try
+        ok = simple_kv:put(Pid1, color, rojo),
+        esperar_valor(Pid2,color,{ok,rojo},1000),
+        esperar_valor(Pid3,color,{ok, rojo},1000),
+        ok = simple_kv:delete(Pid2, color),
+        esperar_valor(Pid1, color, not_found, 1000),
+        esperar_valor(Pid3, color, not_found, 1000),
+        ok = simple_kv:put(Pid3, color, azul),
+        esperar_valor(Pid2,color,{ok,azul},1000),
+        esperar_valor(Pid1,color,{ok, azul},1000)
+    after
+        simple_kv:stop(Pids)
+    end.
+
 %%% utils
 
 obtener_plazo_ms(Ms)->erlang:monotonic_time(millisecond) + Ms.
