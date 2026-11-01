@@ -35,20 +35,24 @@ delete(Pid, Key) ->
         {Ref, ok} -> ok
     end.
 
-loop(Map) ->
+loop(Peers, Map) ->
     receive
         stop -> ok;
         {put, Client, Ref, Key, Val, Time} ->
-            NewMap = maps:put(Key, {Val, expira(Time)}, Map),
+            Entry = {nueva_version(), {value, Val, expira(Time)}},
+            NewMap = maps:put(Key, Entry, Map),
             Client ! {Ref, ok},
-            loop(NewMap);
+            loop(Peers, NewMap);
         {delete, Client, Ref, Key} ->
-            NewMap = maps:remove(Key, Map),
+            Entry = {nueva_version(), tombstone},
+            NewMap = maps:put(Key, Entry, Map),
             Client ! {Ref, ok},
-            loop(NewMap);
+            loop(Peers, NewMap);
         {get, Client, Ref, Key} ->
             case maps:find(Key, Map) of
-                {ok, {Value, Vencimiento}} ->
+                {ok, {_Version, tombstone}} ->
+                    Client ! {Ref, not_found};
+                {ok, {_Version, {value, Value, Vencimiento}}} ->
                 case vigente(Vencimiento) of
                     true ->
                         Client ! {Ref, ok, Value};
@@ -58,17 +62,26 @@ loop(Map) ->
                 error ->
                     Client ! {Ref, not_found}
             end,
-            loop(Map);
+            loop(Peers, Map);
         _ ->
-            loop(Map)
+            loop(Peers, Map)
     end.
 
 start_link(N) when is_integer(N), N >= 1 ->
     Pids = lists:map(
-        fun(_) -> spawn_link(fun() -> loop(#{}) end) end,
+        fun(_) -> spawn_link(fun() -> init() end) end,
         lists:seq(1, N)
     ),
+    lists:foreach(
+        fun(Pid) -> Pid ! {peers, lists:delete(Pid, Pids)} end,
+        Pids
+    ),
     {ok, Pids}.
+
+init() ->
+    receive
+        {peers, Peers} -> loop(Peers, #{})
+    end.
 
 stop(Pids) ->
     lists:foreach(
@@ -82,6 +95,11 @@ stop(Pids) ->
         end,
         Pids
     ).
+
+%%% ============ Versiones y conflictos ============
+
+nueva_version() ->
+    erlang:unique_integer([monotonic]).
 
 %%% ============ TTL ============
 
