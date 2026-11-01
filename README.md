@@ -61,7 +61,7 @@ Próximo foco: respuestas breves con **concepto + justificación concreta**; no 
 
 **Examen viernes 30/10, 17:00–17:30**, presencial en aula habitual, DNI y birome, sin dispositivos: reportado confirmado por calendario y recordatorio docente del 29/10. Número de aula pendiente de revalidar.
 
-**Consulta de corrección práctica:** sigue sin confirmar si hay alguna pendiente. Mail del 27/10: tres días hábiles posteriores a recepción mediante formulario; no se envió nada. Revisar antes del vencimiento, sin asumir que el envío sea necesario. [Formulario práctico](https://forms.gle/8PoUeSLpfMo2saXn7).
+**Consulta de corrección práctica:** descartada por decisión del alumno. Asunto cerrado; no mantener recordatorios de consulta. Primer parcial: teórica A y práctica 6,13, confirmado por mail del 27/10.
 
 ### Tiempo y balance
 
@@ -86,7 +86,7 @@ Entregar implementación `.erl`, tests propios y documento de diseño de **máxi
 
 ## Primer paso concreto
 
-**ISW:** rendir el viernes 30/10 a las 17:00. Revalidar número de aula y resolver si hay consulta práctica pendiente. Solo con disponibilidad real, repaso breve de concepto + justificación y distinciones corregidas; conclusiones de Cultures parcialmente cubiertas. No imponer otra sesión pesada.
+**ISW:** rendir el viernes 30/10 a las 17:00. Revalidar número de aula. Solo con disponibilidad real, repaso breve de concepto + justificación y distinciones corregidas; conclusiones de Cultures parcialmente cubiertas. No imponer otra sesión pesada.
 
 **PCP:** partir de la versión local final del lunes. Conservar/identificar esa versión y registrar la salida de la suite al retomar; después abordar incrementalmente **TTL 0 y expiración positiva**, según la consigna. Mantener el timeout de stop como decisión pendiente de revisión, sin considerar el cierre definitivamente validado. No reiniciar el proyecto ni repetir toda la validación de start_link como si no se hubiera hecho.
 
