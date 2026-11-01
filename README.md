@@ -2,7 +2,7 @@
 
 ## Estado actual
 
-Actualizado al **domingo 1/11/2026, Buenos Aires**, con balance del parcialito reportado por el alumno. Disponibilidad y energía actuales pendientes de confirmar; no hay nuevos bloques asignados. Última sesión de estudio detallada: jueves 29/10, energía final media-alta, según tutor/alumno; planificación no reejecutó evaluaciones.
+Actualizado al **domingo 1/11/2026, Buenos Aires**, con balance del parcialito reportado por el alumno. Disponibilidad actual confirmada: hasta 5 h hoy a ritmo tranquilo; horario de inicio y energía sin cuantificar. Plan de hoy debajo; sin disponibilidad futura confirmada. Última sesión de estudio detallada: jueves 29/10, energía final media-alta, según tutor/alumno; planificación no reejecutó evaluaciones.
 
 La sesión del jueves fue de ISW. No se reportan cambios de PCP ni pruebas nuevas; se conserva la evidencia técnica del lunes. No se agregan horas compensatorias.
 
@@ -67,7 +67,7 @@ Próximo foco: respuestas breves con **concepto + justificación concreta**; no 
 
 Parcialito ISW del viernes 30/10 rendido, según reporte del alumno recibido el 1/11. Autoevaluación: 2 de 3 respuestas estuvieron bien; en la tercera improvisó al explicar qué significa en Modern Software Engineering «la producción no es nuestro problema» y relacionarlo con cascada. No hay nota ni corrección docente confirmada, respuestas textuales ni evaluación independiente del planificador. Dejar esa relación puntual para el tutor: contrastar con el pasaje y validar después una respuesta autónoma con concepto + justificación; no reiniciar Farley completo.
 
-Prioridad siguiente: TP PCP hasta el 11/11 y preparación coordinada PCP 16/11 e ISW 17/11. Disponibilidad real y eventual avance PCP posterior al jueves pendientes de respuesta. No suponer ausencia de avance ni tiempo libre.
+Prioridad siguiente: TP PCP hasta el 11/11 y preparación coordinada PCP 16/11 e ISW 17/11. El alumno confirma el 1/11 que no hubo avance nuevo de PCP. Hasta 5 h disponibles hoy; disponibilidad posterior sin confirmar.
 
 ### Tiempo y balance
 
@@ -92,11 +92,29 @@ Entregar implementación `.erl`, tests propios y documento de diseño de **máxi
 
 ## Primer paso concreto
 
-**Antes de asignar bloques:** confirmar días, horarios y energía disponibles, y si hubo avance PCP desde el jueves. Parcialito ISW ya rendido; nota pendiente. El tutor retoma solo la relación puntual Farley/producción/cascada y las justificaciones pendientes cuando se acuerde un bloque.
+**Hoy:** seguir la sesión del 1/11 de abajo con el tutor; 5 h disponibles y sin avance nuevo PCP, según alumno. Confirmar disponibilidad posterior antes de distribuir la semana. Parcialito ISW ya rendido; nota pendiente. El tutor retoma solo la relación puntual Farley/producción/cascada y las justificaciones pendientes cuando se acuerde un bloque.
 
 **PCP:** partir de la versión local final del lunes. Conservar/identificar esa versión y registrar la salida de la suite al retomar; después abordar incrementalmente **TTL 0 y expiración positiva**, según la consigna. Mantener el timeout de stop como decisión pendiente de revisión, sin considerar el cierre definitivamente validado. No reiniciar el proyecto ni repetir toda la validación de start_link como si no se hubiera hecho.
 
 No agregar bloques por el tiempo no consumido. El tutor prepara el check-in; el agente de planificación actualiza README y calendario.
+
+## Sesión del domingo 1/11 — hasta 5 horas, ritmo tranquilo
+
+Disponibilidad reportada por el alumno: 5 horas hoy; sin horario fijo ni energía cuantificada. Informa que no hubo avance nuevo de PCP. Es presupuesto, no tiempo realizado. No hay disponibilidad futura confirmada.
+
+| Duración orientativa | Objetivo | Criterio de cierre |
+| --- | --- | --- |
+| 20 min PCP con tutor | Identificar versión local actual; compilar y ejecutar suite. | Guardar versión/comandos/salida completa, o bloqueo reproducible. No asumir igualdad con GitHub. |
+| 55 min PCP con tutor | Test TTL 0 y mínimo cambio para resolverlo según consigna. | Test observado y regresión ejecutada, o fallo concreto guardado; sin exigir terminarlo por reloj. |
+| 10 min | Pausa. | Cortar pantalla. |
+| 55 min PCP con tutor | Consolidar TTL 0; si quedó verde, expiración positiva. | Caso observable y suite guardada; distinguir implementado de validado. Si la base falla, este bloque resuelve ese bloqueo. |
+| 25 min | Comida/descanso. | Fuera del tiempo efectivo. |
+| 55 min PCP con tutor | Revisar interacción TTL/infinity/sobrescritura y anotar diseño; elegir con tutor un siguiente test según avance real. | Resultado reproducible, notas de diseño y un próximo paso concreto. Replicación no obligatoria hoy. |
+| 10 min | Pausa. | Cortar pantalla y revisar energía. |
+| 35 min ISW con tutor, recortable si hay cansancio | Retomar únicamente Farley: «producción no es nuestro problema» y cascada. Pedir pasaje usado y reconstrucción breve de respuesta del examen. | Contraste con fuente y respuesta nueva autónoma con concepto + justificación; registrar ayudas y si requiere validación diferida. |
+| 20 min | Cierre y check-in. | Versión/salidas, tests, decisiones, ayuda/autonomía, tiempo medido/estimado, energía y disponibilidad futura. |
+
+Presupuesto: 4 h de bloques + 45 min de pausas = 4 h 45; 15 min de margen sin tareas asignadas. Si baja la energía, recortar el bloque ISW o el tercer bloque PCP y conservar cierre. No prolongar para compensar. El tutor trabaja contenido; el planificador recibe check-in y actualiza persistencia.
 
 ## Sesión del lunes 26/10 — dos horas disponibles
 
