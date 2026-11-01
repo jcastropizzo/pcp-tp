@@ -38,8 +38,8 @@ delete(Pid, Key) ->
 loop(Map) ->
     receive
         stop -> ok;
-        {put, Client, Ref, Key, Val, _Time} ->
-            NewMap = maps:put(Key, Val, Map),
+        {put, Client, Ref, Key, Val, Time} ->
+            NewMap = maps:put(Key, {Val, expira(Time)}, Map),
             Client ! {Ref, ok},
             loop(NewMap);
         {delete, Client, Ref, Key} ->
@@ -48,8 +48,13 @@ loop(Map) ->
             loop(NewMap);
         {get, Client, Ref, Key} ->
             case maps:find(Key, Map) of
-                {ok, Value} ->
-                    Client ! {Ref, ok, Value};
+                {ok, {Value, Vencimiento}} ->
+                case vigente(Vencimiento) of
+                    true ->
+                        Client ! {Ref, ok, Value};
+                    false ->
+                        Client ! {Ref, not_found}
+                end;
                 error ->
                     Client ! {Ref, not_found}
             end,
@@ -77,3 +82,11 @@ stop(Pids) ->
         end,
         Pids
     ).
+
+%%% ============ TTL ============
+
+expira(infinity) -> infinity;
+expira(Time) -> erlang:monotonic_time(millisecond) + Time.
+
+vigente(infinity) -> true;
+vigente(Expira) -> erlang:monotonic_time(millisecond) < Expira.

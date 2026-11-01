@@ -60,3 +60,13 @@ mensaje_desconocido_es_ignorado_test() ->
     {ok, ColorVal} = simple_kv:get(Pid, color),
     ?assertEqual(rojo, ColorVal),
     simple_kv:stop([Pid]).
+
+ttl_cero_reemplaza_valor_anterior_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    try
+        ok = simple_kv:put(Pid, color, rojo),
+        ok = simple_kv:put(Pid, color, azul, 0),
+        ?assertEqual(not_found, simple_kv:get(Pid, color))
+    after
+        simple_kv:stop([Pid])
+    end.
