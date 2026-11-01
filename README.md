@@ -2,7 +2,7 @@
 
 ## Estado actual
 
-Cierre del **jueves 29/10/2026, Buenos Aires**. Energía final: **media-alta**. Check-in reportado por el tutor y aportado por el alumno; planificación no reejecutó las evaluaciones.
+Actualizado al **domingo 1/11/2026, Buenos Aires**, con balance del parcialito reportado por el alumno. Disponibilidad y energía actuales pendientes de confirmar; no hay nuevos bloques asignados. Última sesión de estudio detallada: jueves 29/10, energía final media-alta, según tutor/alumno; planificación no reejecutó evaluaciones.
 
 La sesión del jueves fue de ISW. No se reportan cambios de PCP ni pruebas nuevas; se conserva la evidencia técnica del lunes. No se agregan horas compensatorias.
 
@@ -63,6 +63,12 @@ Próximo foco: respuestas breves con **concepto + justificación concreta**; no 
 
 **Consulta de corrección práctica:** descartada por decisión del alumno. Asunto cerrado; no mantener recordatorios de consulta. Primer parcial: teórica A y práctica 6,13, confirmado por mail del 27/10.
 
+### ISW: balance del parcialito 30/10
+
+Parcialito ISW del viernes 30/10 rendido, según reporte del alumno recibido el 1/11. Autoevaluación: 2 de 3 respuestas estuvieron bien; en la tercera improvisó al explicar qué significa en Modern Software Engineering «la producción no es nuestro problema» y relacionarlo con cascada. No hay nota ni corrección docente confirmada, respuestas textuales ni evaluación independiente del planificador. Dejar esa relación puntual para el tutor: contrastar con el pasaje y validar después una respuesta autónoma con concepto + justificación; no reiniciar Farley completo.
+
+Prioridad siguiente: TP PCP hasta el 11/11 y preparación coordinada PCP 16/11 e ISW 17/11. Disponibilidad real y eventual avance PCP posterior al jueves pendientes de respuesta. No suponer ausencia de avance ni tiempo libre.
+
 ### Tiempo y balance
 
 - Jueves: disponibilidad confirmada de 3 h incluyendo pausas; bloques de 35, 30 y 25 min reportados completos, pausa de 10 min confirmada y comida intermedia. Otros temporizadores/interrupciones no identificados con precisión; distracciones y película de fondo. **Sin total efectivo fiable**: no registrar las 3 h ni la suma de bloques como tiempo efectivo medido. Energía final media-alta.
@@ -86,7 +92,7 @@ Entregar implementación `.erl`, tests propios y documento de diseño de **máxi
 
 ## Primer paso concreto
 
-**ISW:** rendir el viernes 30/10 a las 17:00. Revalidar número de aula. Solo con disponibilidad real, repaso breve de concepto + justificación y distinciones corregidas; conclusiones de Cultures parcialmente cubiertas. No imponer otra sesión pesada.
+**Antes de asignar bloques:** confirmar días, horarios y energía disponibles, y si hubo avance PCP desde el jueves. Parcialito ISW ya rendido; nota pendiente. El tutor retoma solo la relación puntual Farley/producción/cascada y las justificaciones pendientes cuando se acuerde un bloque.
 
 **PCP:** partir de la versión local final del lunes. Conservar/identificar esa versión y registrar la salida de la suite al retomar; después abordar incrementalmente **TTL 0 y expiración positiva**, según la consigna. Mantener el timeout de stop como decisión pendiente de revisión, sin considerar el cierre definitivamente validado. No reiniciar el proyecto ni repetir toda la validación de start_link como si no se hubiera hecho.
 
@@ -120,7 +126,7 @@ Se conserva el plan acordado, con sus presupuestos y pausas; la ejecución real 
 | Mar 27 | Sin estudio | Informado por el alumno. Asistencia a cursada sin confirmar; alcance del parcialito no resuelto. |
 | Mié 28 | Sesión cerrada; plan de 150 min recortado | Visitor trabajado y validación ISW 3/3 sin pistas; tiempo efectivo desconocido. PCP no realizado, TTL pendiente. No trasladar automáticamente el bloque omitido. |
 | Jue 29 | Sesión ISW cerrada; 3 h disponibles | Check-in arriba: simulacro 3 respuestas autónomas correctas con justificaciones incompletas; nuevas distinciones trabajadas, total efectivo desconocido. Energía media-alta. Sin bloque PCP obligatorio. |
-| Vie 30 | 15 min, si hay hueco real | Rendir ISW; inventario de requisitos pendientes y planificación siguiente hacia la entrega del 11/11. Sin implementación pesada después de cursar. |
+| Vie 30 | Examen rendido; balance reportado | Autoevaluación 2/3 bien; tercera improvisada sobre Farley, producción y cascada. Nota pendiente; inventario PCP y tiempo de estudio no confirmados. |
 
 ### Sesión del domingo 25 — máximo 5 horas
 
