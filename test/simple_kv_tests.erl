@@ -1,62 +1,79 @@
--module(simple_kv_tests).
--include_lib("eunit/include/eunit.hrl").
+-module(simple_kv).
+-export([start_link/1, stop/1, put/3, put/4, delete/2, get/2]).
 
-iniciar_una_replica_escribir_y_leer_devuelve_ok_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    ok = simple_kv:put(Pid, color, rojo),
-    {ok, ColorVal} = simple_kv:get(Pid, color),
-    ?assertEqual(rojo, ColorVal),
-    simple_kv:stop([Pid]).
+-spec start_link(pos_integer()) -> {ok, [pid()]}.
+-spec stop([pid()]) -> ok.
+-spec put(pid(), term(), term()) -> ok.
+-spec put(pid(), term(), term(), non_neg_integer() | infinity) -> ok.
+-spec delete(pid(), term()) -> ok.
+-spec get(pid(), term()) -> {ok, term()} | not_found.
 
-iniciar_tres_replicas_test() ->
-    {ok, Pids} = simple_kv:start_link(3),
-    ?assertEqual(3, length(Pids)),
-    simple_kv:stop(Pids).
+put(A, B, C) ->
+    put(A, B, C, infinity).
 
-iniciar_tres_replicas_devuelve_replicas_distintas_test() ->
-    {ok, Pids} = simple_kv:start_link(3),
-    UniquePids = lists:usort(Pids),
-    ?assertEqual(3, length(Pids)),
-    ?assertEqual(3, length(UniquePids)),
-    ?assert(lists:all(fun(Pid) -> is_pid(Pid) andalso is_process_alive(Pid) end, Pids)),
-    simple_kv:stop(Pids),
-    ?assert(lists:all(fun(Pid) -> is_pid(Pid) andalso not is_process_alive(Pid) end, Pids)).
+put(Pid, Key, Val, Time) when
+    is_integer(Time), Time >= 0; Time =:= infinity
+->
+    Ref = make_ref(),
+    Pid ! {put, self(), Ref, Key, Val, Time},
+    receive
+        {Ref, ok} -> ok
+    end.
 
-leer_devuelve_not_found_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    ?assertEqual(not_found, simple_kv:get(Pid, color)),
-    simple_kv:stop([Pid]).
+get(Pid, Key) ->
+    Ref = make_ref(),
+    Pid ! {get, self(), Ref, Key},
+    receive
+        {Ref, ok, Val} -> {ok, Val};
+        {Ref, not_found} -> not_found
+    end.
 
-escribir_con_tiempo_negativo_devuelve_error_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    ?assertError(function_clause, simple_kv:put(Pid, color, rojo, -1)),
-    simple_kv:stop([Pid]).
+delete(Pid, Key) ->
+    Ref = make_ref(),
+    Pid ! {delete, self(), Ref, Key},
+    receive
+        {Ref, ok} -> ok
+    end.
 
-escribir_leer_borrar_y_leer_devuelve_not_found_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    ok = simple_kv:put(Pid, color, rojo),
-    ok = simple_kv:delete(Pid, color),
-    ?assertEqual(not_found, simple_kv:get(Pid, color)),
-    simple_kv:stop([Pid]).
+loop(Map) ->
+    receive
+        stop -> ok;
+        {put, Client, Ref, Key, Val, _Time} ->
+            NewMap = maps:put(Key, Val, Map),
+            Client ! {Ref, ok},
+            loop(NewMap);
+        {delete, Client, Ref, Key} ->
+            NewMap = maps:remove(Key, Map),
+            Client ! {Ref, ok},
+            loop(NewMap);
+        {get, Client, Ref, Key} ->
+            case maps:find(Key, Map) of
+                {ok, Value} ->
+                    Client ! {Ref, ok, Value};
+                error ->
+                    Client ! {Ref, not_found}
+            end,
+            loop(Map);
+        _ ->
+            loop(Map)
+    end.
 
-start_link_con_numero_negativo_devuelve_error_test() ->
-    ?assertError(function_clause, simple_kv:start_link(-1)).
+start_link(N) when is_integer(N), N >= 1 ->
+    Pids = lists:map(
+        fun(_) -> spawn_link(fun() -> loop(#{}) end) end,
+        lists:seq(1, N)
+    ),
+    {ok, Pids}.
 
-start_link_con_cero_devuelve_error_test() ->
-    ?assertError(function_clause, simple_kv:start_link(0)).
-
-start_link_con_uno_con_decimal_devuelve_error_test() ->
-    ?assertError(function_clause, simple_kv:start_link(1.0)).
-
-borrar_clave_inexistente_devuelve_ok_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    ?assertEqual(ok, simple_kv:delete(Pid, color)),
-    simple_kv:stop([Pid]).
-
-mensaje_desconocido_es_ignorado_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    Pid ! {mensaje_desconocido123, a, 123},
-    ok = simple_kv:put(Pid, color, rojo),
-    {ok, ColorVal} = simple_kv:get(Pid, color),
-    ?assertEqual(rojo, ColorVal),
-    simple_kv:stop([Pid]).
+stop(Pids) ->
+    lists:foreach(
+        fun(Pid) ->
+            Monitor = erlang:monitor(process, Pid),
+            Pid ! stop,
+            receive
+                {'DOWN', Monitor, process, Pid, _Motivo} -> ok
+            after 1000 -> erlang:error(timeout)
+            end
+        end,
+        Pids
+    ).

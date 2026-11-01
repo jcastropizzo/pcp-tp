@@ -37,8 +37,7 @@ delete(Pid, Key) ->
 
 loop(Map) ->
     receive
-        {stop, Ref, Pid} ->
-            Pid ! {Ref, ok};
+        stop -> ok;
         {put, Client, Ref, Key, Val, _Time} ->
             NewMap = maps:put(Key, Val, Map),
             Client ! {Ref, ok},
@@ -69,10 +68,11 @@ start_link(N) when is_integer(N), N >= 1 ->
 stop(Pids) ->
     lists:foreach(
         fun(Pid) ->
-            Ref = make_ref(),
-            Pid ! {stop, Ref, self()},
+            Monitor = erlang:monitor(process, Pid),
+            Pid ! stop,
             receive
-                {Ref, ok} -> ok
+                {'DOWN', Monitor, process, Pid, _Motivo} -> ok
+            after 1000 -> erlang:error(timeout)
             end
         end,
         Pids
