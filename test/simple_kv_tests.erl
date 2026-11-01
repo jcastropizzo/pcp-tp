@@ -102,10 +102,9 @@ ttl_cero_reemplaza_valor_anterior_test() ->
 ttl_mayor_a_cero_expira_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
     try
-        ok = simple_kv:put(Pid, color, rojo, 1000),
+        ok = simple_kv:put(Pid, color, rojo, 300),
         ?assertEqual({ok, rojo}, simple_kv:get(Pid, color)),
-        timer:sleep(1100),
-        ?assertEqual(not_found, simple_kv:get(Pid, color))
+        esperar_valor(Pid, color, not_found,1000)
     after
         simple_kv:stop([Pid])
     end.
@@ -116,8 +115,7 @@ ttl_anterior_vencido_no_modifica_entrada_test() ->
         ok = simple_kv:put(Pid, color, rojo, 1000),
         ok = simple_kv:put(Pid, color, azul),
         ?assertEqual({ok, azul}, simple_kv:get(Pid, color)),
-        timer:sleep(1100),
-        ?assertEqual({ok, azul}, simple_kv:get(Pid, color))
+        esperar_valor(Pid, color, {ok, azul},1000)
     after
         simple_kv:stop([Pid])
     end.
@@ -126,10 +124,40 @@ ttl_infinito_sobrescrito_con_finito_vence_entrada_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
     try
         ok = simple_kv:put(Pid, color, rojo),
-        ok = simple_kv:put(Pid, color, azul,1000),
+        ok = simple_kv:put(Pid, color, azul,300),
         ?assertEqual({ok, azul}, simple_kv:get(Pid, color)),
-        timer:sleep(1100),
-        ?assertEqual(not_found, simple_kv:get(Pid, color))
+        esperar_valor(Pid, color, not_found,1000)
     after
         simple_kv:stop([Pid])
+    end.
+
+escribir_en_p1_replica_leer_en_p2_test()->
+    {ok, Pids} = simple_kv:start_link(3),
+    [Pid1, Pid2, Pid3] = Pids,
+    try
+        ok = simple_kv:put(Pid1, color, rojo),
+        esperar_valor(Pid2,color,{ok,rojo},1000),
+        esperar_valor(Pid3,color,{ok, rojo},1000)
+    after
+        simple_kv:stop(Pids)
+    end.
+
+
+%%% utils
+
+obtener_plazo_ms(Ms)->erlang:monotonic_time(millisecond) + Ms.
+
+esperar_valor(Pid, Key, Esperado, Ms) ->
+    Actual = simple_kv:get(Pid, Key),
+    case Actual =:= Esperado of
+        true ->
+            ok;
+        false ->
+            case erlang:monotonic_time(millisecond) >= obtener_plazo_ms(Ms) of
+                true ->
+                    ?assertEqual(Esperado, Actual);
+                false ->
+                    timer:sleep(10),
+                    esperar_valor(Pid, Key, Esperado, Ms)
+            end
     end.
