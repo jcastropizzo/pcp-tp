@@ -29,8 +29,36 @@ leer_devuelve_not_found_test() ->
 
 escribir_con_tiempo_negativo_devuelve_error_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
-    ?assertError(function_clause, simple_kv:put(Pid, color, rojo, -1)),
-    simple_kv:stop([Pid]).
+    try
+        ?assertError(function_clause, simple_kv:put(Pid, color, rojo, -1)),
+        ok = simple_kv:put(Pid, color, rojo),
+        {ok, ColorVal} = simple_kv:get(Pid, color),
+        ?assertEqual(rojo, ColorVal)
+    after
+        simple_kv:stop([Pid])
+    end.
+
+escribir_con_un_atomo_invalido_devuelve_error_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    try
+        ?assertError(function_clause, simple_kv:put(Pid, color, rojo, inifinito)),
+        ok = simple_kv:put(Pid, color, rojo),
+        {ok, ColorVal} = simple_kv:get(Pid, color),
+        ?assertEqual(rojo, ColorVal)
+    after
+        simple_kv:stop([Pid])
+    end.
+
+escribir_con_float_como_tiempo_devuelve_error_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    try
+        ?assertError(function_clause, simple_kv:put(Pid, color, rojo, 1.0)),
+        ok = simple_kv:put(Pid, color, rojo),
+        {ok, ColorVal} = simple_kv:get(Pid, color),
+        ?assertEqual(rojo, ColorVal)
+    after
+        simple_kv:stop([Pid])
+    end.
 
 escribir_leer_borrar_y_leer_devuelve_not_found_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
@@ -67,6 +95,29 @@ ttl_cero_reemplaza_valor_anterior_test() ->
         ok = simple_kv:put(Pid, color, rojo),
         ok = simple_kv:put(Pid, color, azul, 0),
         ?assertEqual(not_found, simple_kv:get(Pid, color))
+    after
+        simple_kv:stop([Pid])
+    end.
+
+ttl_mayor_a_cero_expira_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    try
+        ok = simple_kv:put(Pid, color, rojo, 1000),
+        ?assertEqual({ok, rojo}, simple_kv:get(Pid, color)),
+        timer:sleep(1100),
+        ?assertEqual(not_found, simple_kv:get(Pid, color))
+    after
+        simple_kv:stop([Pid])
+    end.
+
+ttl_anterior_vencido_no_modifica_entrada_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    try
+        ok = simple_kv:put(Pid, color, rojo, 1000),
+        ok = simple_kv:put(Pid, color, azul),
+        ?assertEqual({ok, azul}, simple_kv:get(Pid, color)),
+        timer:sleep(1100),
+        ?assertEqual({ok, azul}, simple_kv:get(Pid, color))
     after
         simple_kv:stop([Pid])
     end.
