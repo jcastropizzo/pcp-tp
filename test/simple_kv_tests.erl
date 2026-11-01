@@ -112,10 +112,11 @@ ttl_mayor_a_cero_expira_test() ->
 ttl_anterior_vencido_no_modifica_entrada_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
     try
-        ok = simple_kv:put(Pid, color, rojo, 1000),
+        ok = simple_kv:put(Pid, color, rojo, 300),
         ok = simple_kv:put(Pid, color, azul),
         ?assertEqual({ok, azul}, simple_kv:get(Pid, color)),
-        esperar_valor(Pid, color, {ok, azul},1000)
+        timer:sleep(400),
+        ?assertEqual({ok, azul}, simple_kv:get(Pid, color))
     after
         simple_kv:stop([Pid])
     end.
@@ -148,16 +149,20 @@ escribir_en_p1_replica_leer_en_p2_test()->
 obtener_plazo_ms(Ms)->erlang:monotonic_time(millisecond) + Ms.
 
 esperar_valor(Pid, Key, Esperado, Ms) ->
+    Plazo = obtener_plazo_ms(Ms),
+    esperar_valor_hasta(Pid, Key, Esperado, Plazo).
+
+esperar_valor_hasta(Pid, Key, Esperado, Plazo) ->
     Actual = simple_kv:get(Pid, Key),
     case Actual =:= Esperado of
         true ->
             ok;
         false ->
-            case erlang:monotonic_time(millisecond) >= obtener_plazo_ms(Ms) of
+            case erlang:monotonic_time(millisecond) >= Plazo of
                 true ->
                     ?assertEqual(Esperado, Actual);
                 false ->
                     timer:sleep(10),
-                    esperar_valor(Pid, Key, Esperado, Ms)
+                    esperar_valor_hasta(Pid, Key, Esperado, Plazo)
             end
     end.
