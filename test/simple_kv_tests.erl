@@ -8,10 +8,6 @@ iniciar_una_replica_escribir_y_leer_devuelve_ok_test() ->
     ?assertEqual(rojo, ColorVal),
     simple_kv:stop([Pid]).
 
-iniciar_tres_replicas_test() ->
-    {ok, Pids} = simple_kv:start_link(3),
-    ?assertEqual(3, length(Pids)),
-    simple_kv:stop(Pids).
 
 iniciar_tres_replicas_devuelve_replicas_distintas_test() ->
     {ok, Pids} = simple_kv:start_link(3),

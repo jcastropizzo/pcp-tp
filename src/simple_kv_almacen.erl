@@ -1,5 +1,5 @@
 -module(simple_kv_almacen).
--export([buscar_local/3, registrar_metadata/3, aplicar_actualizacion/4]).
+-export([buscar_local/3, registrar_metadata/3, aplicar_actualizacion/4, es_mensaje_nuevo/3]).
 
 buscar_local(Key, Map, Metadatos) ->
     case maps:find(Key, Metadatos) of
@@ -55,4 +55,17 @@ aplicar_actualizacion(Key, {VersionNueva, Contenido} = Nueva, Map, Metadatos) ->
                 %% El vencimiento se comprueba al leer, no en esta funcion.
                 {value, _, _} -> maps:put(Key, Nueva, Map)
             end
+    end.
+
+%% Compara versiones; una version igual tambien se considera aceptable.
+%% No modifica el estado ni decide si hace falta almacenar el valor.
+-spec es_mensaje_nuevo(
+    term(),
+    {integer(), term()},
+    #{term() => {integer(), valor | borrado | desalojado}}
+) -> boolean().
+es_mensaje_nuevo(Key, {VersionNueva, _Contenido}, Metadatos) ->
+    case maps:find(Key, Metadatos) of
+        error -> true;
+        {ok, {VersionActual, _Estado}} -> VersionNueva >= VersionActual
     end.

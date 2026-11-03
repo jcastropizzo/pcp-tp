@@ -36,3 +36,25 @@ recuperar_desalojado_con_igual_version_test() ->
         {ok, Entry},
         simple_kv_almacen:buscar_local(color, NuevoMap, NuevosMetadatos)
     ).
+
+es_mensaje_nuevo_clave_desconocida_test() ->
+    ?assert(simple_kv_almacen:es_mensaje_nuevo(
+        color, {-5, {value, rojo, infinity}}, #{}
+    )).
+
+es_mensaje_nuevo_compara_versiones_test() ->
+    lists:foreach(
+        fun(Estado) ->
+            Metadatos = #{color => {-5, Estado}},
+            ?assert(simple_kv_almacen:es_mensaje_nuevo(
+                color, {-4, borrado}, Metadatos
+            )),
+            ?assert(simple_kv_almacen:es_mensaje_nuevo(
+                color, {-5, {value, rojo, infinity}}, Metadatos
+            )),
+            ?assertNot(simple_kv_almacen:es_mensaje_nuevo(
+                color, {-6, {value, azul, infinity}}, Metadatos
+            ))
+        end,
+        [valor, borrado, desalojado]
+    ).

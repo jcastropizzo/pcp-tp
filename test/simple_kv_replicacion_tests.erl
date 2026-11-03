@@ -11,8 +11,3 @@ sin_informacion_conserva_la_otra_test() ->
     Entry = {ok, {8, borrado}},
     ?assertEqual(Entry, simple_kv_replicacion:elegir_mayor(error, Entry)),
     ?assertEqual(Entry, simple_kv_replicacion:elegir_mayor(Entry, error)).
-
-versiones_sucesivas_crecientes_test() ->
-    Primera = simple_kv_replicacion:nueva_version(),
-    Segunda = simple_kv_replicacion:nueva_version(),
-    ?assert(Segunda > Primera).

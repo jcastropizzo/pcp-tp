@@ -34,3 +34,12 @@ candidato_a_desalojar_admite_versiones_negativas_test() ->
         {a, Vieja},
         simple_kv_capacidad:candidato_a_desalojar(#{a => Vieja, b => Nueva})
     ).
+
+%% El orden de las claves es opuesto al orden de escritura.
+dos_infinity_eligen_por_version_test() ->
+    Vieja = {3, {value, viejo, infinity}},
+    Nueva = {20, {value, nuevo, infinity}},
+    ?assertEqual(
+        {z, Vieja},
+        simple_kv_capacidad:candidato_a_desalojar(#{a => Nueva, z => Vieja})
+    ).

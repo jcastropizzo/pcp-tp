@@ -21,33 +21,47 @@ loop(Peers, Map, Metadatos, Pendientes) ->
             ok;
         {put, Client, Ref, Key, Val, Time} ->
             Estado = simple_kv_capacidad:estado_capacidad(Map),
-            {MapaFinal, MetadatosFinales} = case Estado of
-                {con_espacio, _}->
-                    Entry = {simple_kv_replicacion:nueva_version(), {value, Val, simple_kv_ttl:expira(Time)}},
-                    NuevosMetadatos = simple_kv_almacen:registrar_metadata(Key, Entry, Metadatos),
-                    NewMap = maps:put(Key, Entry, Map),
-                    Client ! {Ref, ok},
-                    simple_kv_replicacion:replicar(Peers, Key, Entry),
-                        {NewMap, NuevosMetadatos};
-                {llena, _} ->
-                    Candidato = simple_kv_capacidad:candidato_a_desalojar(Map),
-                    case Candidato of 
-                    %% no deberia llegar nunca a esta caso
-                    ninguno -> erlang:error(capacidad_llena_sin_candidato);
-                    {KeyDesalojada, _Entry}->
-                        {MapDesalojado, MetadatosDesalojados} = simple_kv_capacidad:desalojar(KeyDesalojada, Map, Metadatos),
-                        Entry = {simple_kv_replicacion:nueva_version(), {value, Val, simple_kv_ttl:expira(Time)}},
-                        NuevosMetadatos = simple_kv_almacen:registrar_metadata(Key, Entry, MetadatosDesalojados),
-                        NewMap = maps:put(Key, Entry, MapDesalojado),
+            {MapaFinal, MetadatosFinales} =
+                case Estado of
+                    {con_espacio, _} ->
+                        Entry = {
+                            simple_kv_replicacion:nueva_version(),
+                            {value, Val, simple_kv_ttl:expira(Time)}
+                        },
+                        NuevosMetadatos = simple_kv_almacen:registrar_metadata(
+                            Key, Entry, Metadatos
+                        ),
+                        NewMap = maps:put(Key, Entry, Map),
                         Client ! {Ref, ok},
                         simple_kv_replicacion:replicar(Peers, Key, Entry),
-                        {NewMap, NuevosMetadatos}
-                    end;
-                {excedida, Cantidad} ->
-                    %% no deberia llegar nunca a esta caso
-                    erlang:error({capacidad_excedida, Cantidad})
-            end,
-            
+                        {NewMap, NuevosMetadatos};
+                    {llena, _} ->
+                        Candidato = simple_kv_capacidad:candidato_a_desalojar(Map),
+                        case Candidato of
+                            %% no deberia llegar nunca a esta caso
+                            ninguno ->
+                                erlang:error(capacidad_llena_sin_candidato);
+                            {KeyDesalojada, _Entry} ->
+                                {MapDesalojado, MetadatosDesalojados} = simple_kv_capacidad:desalojar(
+                                    KeyDesalojada, Map, Metadatos
+                                ),
+                                Entry = {
+                                    simple_kv_replicacion:nueva_version(),
+                                    {value, Val, simple_kv_ttl:expira(Time)}
+                                },
+                                NuevosMetadatos = simple_kv_almacen:registrar_metadata(
+                                    Key, Entry, MetadatosDesalojados
+                                ),
+                                NewMap = maps:put(Key, Entry, MapDesalojado),
+                                Client ! {Ref, ok},
+                                simple_kv_replicacion:replicar(Peers, Key, Entry),
+                                {NewMap, NuevosMetadatos}
+                        end;
+                    {excedida, Cantidad} ->
+                        %% no deberia llegar nunca a esta caso
+                        erlang:error({capacidad_excedida, Cantidad})
+                end,
+
             loop(Peers, MapaFinal, MetadatosFinales, Pendientes);
         {delete, Client, Ref, Key} ->
             Entry = {simple_kv_replicacion:nueva_version(), borrado},
@@ -110,8 +124,51 @@ loop(Peers, Map, Metadatos, Pendientes) ->
                     end
             end;
         {replica, Key, Entry} ->
-            NewMap = simple_kv_almacen:aplicar_actualizacion(Key, Entry, Map, Metadatos),
-            NuevosMetadatos = simple_kv_almacen:registrar_metadata(Key, Entry, Metadatos),
+            EsMensajeNuevo = simple_kv_almacen:es_mensaje_nuevo(Key, Entry, Metadatos),
+            {NewMap, NuevosMetadatos} =
+                case EsMensajeNuevo of
+                    true ->
+                        case Entry of
+                            {_, borrado} ->
+                                MapActualizado = simple_kv_almacen:aplicar_actualizacion(
+                                    Key, Entry, Map, Metadatos
+                                ),
+                                MetadatosActualizados = simple_kv_almacen:registrar_metadata(
+                                    Key, Entry, Metadatos
+                                ),
+                                {MapActualizado, MetadatosActualizados};
+                            {_, {value, _, _}} ->
+                                %% Conservamos version y vencimiento recibidos.
+                                %% Aplicar primero permite distinguir una insercion
+                                %% de una sobrescritura o un duplicado sin cambios.
+                                MapActualizado = simple_kv_almacen:aplicar_actualizacion(
+                                    Key, Entry, Map, Metadatos
+                                ),
+                                MetadatosActualizados = simple_kv_almacen:registrar_metadata(
+                                    Key, Entry, Metadatos
+                                ),
+                                case simple_kv_capacidad:estado_capacidad(MapActualizado) of
+                                    {excedida, _} ->
+                                        %% El candidato incluye la entrada recibida:
+                                        %% puede ser mas vieja que las conservadas.
+                                        %% PENDIENTE: ofrecer a pares antes de desalojar.
+                                        case simple_kv_capacidad:candidato_a_desalojar(MapActualizado) of
+                                            ninguno ->
+                                                erlang:error(capacidad_llena_sin_candidato);
+                                            {KeyDesalojada, _} ->
+                                                simple_kv_capacidad:desalojar(
+                                                    KeyDesalojada,
+                                                    MapActualizado,
+                                                    MetadatosActualizados
+                                                )
+                                        end;
+                                    _ ->
+                                        {MapActualizado, MetadatosActualizados}
+                                end
+                            end;
+                    false ->
+                        {Map, Metadatos}
+                end,
             loop(Peers, NewMap, NuevosMetadatos, Pendientes);
         {respuesta_consulta, ConsultaRef, Peer, Resultado} ->
             case maps:find(ConsultaRef, Pendientes) of
@@ -125,10 +182,11 @@ loop(Peers, Map, Metadatos, Pendientes) ->
                             case Restantes of
                                 [] ->
                                     Final = simple_kv_replicacion:elegir_mayor(
-                                        NuevoMejor, simple_kv_almacen:buscar_local(Key, Map, Metadatos)
+                                        NuevoMejor,
+                                        simple_kv_almacen:buscar_local(Key, Map, Metadatos)
                                     ),
                                     responder_lectura(Client, Ref, Final),
-                                    
+
                                     loop(
                                         Peers,
                                         Map,
