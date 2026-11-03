@@ -31,7 +31,20 @@ Julián propuso separar metadatos, razonó sobre TTL y referencias de expiració
 
 **Probar el selector con dos valores infinity y versiones en orden contrario al de las claves.** Cierre: test reproducible, corrección únicamente de ese caso si falla y regresión guardada. Después elegir el siguiente incremento; sin ampliar capacidad antes de cerrar ese caso.
 
-No hay bloque futuro confirmado. Se expresó intención de retomar “mañana”, sin fecha absoluta, horario ni cantidad de horas confirmados.
+## Próxima sesión confirmada — martes 3/11, 22:00–00:00
+
+America/Buenos_Aires. Dos horas incluyendo pausa, confirmadas por alumno incluso tras advertir el evento de calendario superpuesto; no modificar ese otro evento. Energía por confirmar al comenzar.
+
+| Horario | Objetivo | Criterio de cierre |
+| --- | --- | --- |
+| 22:00–22:10 | Con tutor, comprobar versión y cambios desde el cierre anterior; confirmar energía. | Estado actual identificado; conservar evidencia previa sin repetir validaciones innecesarias. |
+| 22:10–22:50 | Test selector con dos infinity y versiones opuestas al orden de claves; corregir solo ese caso si falla. | Test permanente con resultado observado y cambio mínimo, o bloqueo reproducible. |
+| 22:50–23:00 | Pausa. | Fuera del tiempo efectivo. |
+| 23:00–23:40 | Si el selector quedó resuelto, abordar un test de sobrescritura con capacidad llena; si no, continuar el mismo bloqueo. | Resultado reproducible y regresión guardada; no exigir completar toda capacidad. |
+| 23:40–00:00 | Regresión final y check-in. | Comandos/salidas, versión, ayuda/autonomía, decisiones, pendientes, tiempo real y energía final. |
+
+Presupuesto de tareas 110 min + pausa 10 min, no tiempo realizado. Si hay cansancio, recortar segundo incremento y conservar cierre. Sin disponibilidad confirmada después de esta sesión.
+
 
 ## Pendientes prioritarios
 
