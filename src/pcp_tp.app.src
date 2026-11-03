@@ -1,0 +1,8 @@
+{application, pcp_tp, [
+    {description, "TP PCP: almacen key-value replicado"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [kernel, stdlib]},
+    {env, []},
+    {modules, []}
+]}.

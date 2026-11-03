@@ -14,9 +14,9 @@ Este documento explica qué se cambió respecto del código original y por qué.
 | Contenido del mapa | `Key => Val` | `Key => {Version, Dato}` | Poder comparar escrituras |
 | `put` | `maps:put(Key, Val, Map)` | Guarda `{Version, {value, Val, Expira}}` y replica | Versiones + TTL + replicación |
 | `delete` | `maps:remove(Key, Map)` | Guarda `{Version, tombstone}` y replica | Que un borrado no se pierda (4.5) |
-| Mensaje nuevo | — | `{replica, Key, Entry}` → `merge` | Recibir cambios de otras réplicas |
+| Mensaje nuevo | — | `{replica, Key, Entry}` → `aplicar_actualizacion` | Recibir cambios de otras réplicas |
 | `get` | Devolvía el valor si existía | Distingue valor, vencido y tombstone | TTL y borrados |
-| Auxiliares nuevas | — | `nueva_version`, `replicar`, `merge`, `expira`, `vigente` | Lógica de versiones, conflictos y TTL |
+| Auxiliares nuevas | — | `nueva_version`, `replicar`, `aplicar_actualizacion`, `expira`, `vigente` | Lógica de versiones, conflictos y TTL |
 
 ---
 
@@ -70,10 +70,10 @@ Es el mismo patrón que `release/1` del semáforo visto en clase (`S ! release`)
 
 ```erlang
 {replica, Key, Entry} ->
-    loop(Peers, merge(Key, Entry, Map));
+    loop(Peers, aplicar_actualizacion(Key, Entry, Map));
 ```
 
-Este mensaje no se responde. Solo se combina lo que llega con lo que ya hay, usando `merge` (sección 4).
+Este mensaje no se responde. Solo se combina lo que llega con lo que ya hay, usando `aplicar_actualizacion` (sección 4).
 
 ---
 
@@ -113,14 +113,14 @@ Key => {Version, {value, Val, Expira}}   % valor (con su vencimiento)
 Key => {Version, tombstone}              % borrado
 ```
 
-El primer elemento siempre es la versión. Eso permite que `merge` compare cualquier par de entradas, sean valores o borrados.
+El primer elemento siempre es la versión. Eso permite que `aplicar_actualizacion` compare cualquier par de entradas, sean valores o borrados.
 
 ---
 
-## 4. `merge`: resolución de conflictos (4.3 y 4.4)
+## 4. `aplicar_actualizacion`: resolución de conflictos (4.3 y 4.4)
 
 ```erlang
-merge(Key, {VersionNueva, _} = Nueva, Map) ->
+aplicar_actualizacion(Key, {VersionNueva, _} = Nueva, Map) ->
     case maps:find(Key, Map) of
         {ok, {VersionActual, _}} when VersionActual >= VersionNueva ->
             Map;
@@ -159,7 +159,7 @@ Entonces, cuando dejan de producirse escrituras y llegan todos los mensajes, tod
 
 En ambos órdenes el resultado es el mismo.
 
-### Por qué el `put` local no usa `merge`
+### Por qué el `put` local no usa `aplicar_actualizacion`
 
 En la rama `put` del loop se hace directamente `maps:put`. La versión recién generada siempre es mayor que cualquier otra que esa réplica ya haya visto, así que siempre ganaría.
 
@@ -198,11 +198,11 @@ El mismo caso ahora:
 1. `put(P1, color, rojo)` → versión 10, demorado.
 2. `delete(P2, color)` → lápida con versión 20, llega primero a P3.
 3. P3 guarda `{20, tombstone}`. La clave **sigue en el mapa**.
-4. Llega el `put` con versión 10. `merge` ve 20 ≥ 10 y lo descarta.
+4. Llega el `put` con versión 10. `aplicar_actualizacion` ve 20 ≥ 10 y lo descarta.
 
 El dato sigue borrado. Si después alguien hace un `put` nuevo, va a tener una versión mayor que 20 y sí gana. Así se cumple que **un dato borrado solo vuelve a aparecer mediante una nueva escritura**.
 
-La ventaja es que **la regla de borrado es la misma que la de conflictos**: un `delete` es una escritura más, y `merge` no necesita casos especiales.
+La ventaja es que **la regla de borrado es la misma que la de conflictos**: un `delete` es una escritura más, y `aplicar_actualizacion` no necesita casos especiales.
 
 ### Costo
 

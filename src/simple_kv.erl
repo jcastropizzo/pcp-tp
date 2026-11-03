@@ -35,45 +35,9 @@ delete(Pid, Key) ->
         {Ref, ok} -> ok
     end.
 
-loop(Peers, Map) ->
-    receive
-        stop -> ok;
-        {put, Client, Ref, Key, Val, Time} ->
-            Entry = {nueva_version(), {value, Val, expira(Time)}},
-            NewMap = maps:put(Key, Entry, Map),
-            Client ! {Ref, ok},
-            replicar(Peers, Key, Entry),
-            loop(Peers, NewMap);
-        {delete, Client, Ref, Key} ->
-            Entry = {nueva_version(), tombstone},
-            NewMap = maps:put(Key, Entry, Map),
-            Client ! {Ref, ok},
-            replicar(Peers, Key, Entry),
-            loop(Peers, NewMap);
-        {get, Client, Ref, Key} ->
-            case maps:find(Key, Map) of
-                {ok, {_Version, tombstone}} ->
-                    Client ! {Ref, not_found};
-                {ok, {_Version, {value, Value, Vencimiento}}} ->
-                case vigente(Vencimiento) of
-                    true ->
-                        Client ! {Ref, ok, Value};
-                    false ->
-                        Client ! {Ref, not_found}
-                end;
-                error ->
-                    Client ! {Ref, not_found}
-            end,
-            loop(Peers, Map);
-        {replica, Key, Entry} ->
-            loop(Peers, merge(Key, Entry, Map));
-        _ ->
-            loop(Peers, Map)
-    end.
-
 start_link(N) when is_integer(N), N >= 1 ->
     Pids = lists:map(
-        fun(_) -> spawn_link(fun() -> init() end) end,
+        fun(_) -> spawn_link(fun() -> simple_kv_replica:init() end) end,
         lists:seq(1, N)
     ),
     lists:foreach(
@@ -81,11 +45,6 @@ start_link(N) when is_integer(N), N >= 1 ->
         Pids
     ),
     {ok, Pids}.
-
-init() ->
-    receive
-        {peers, Peers} -> loop(Peers, #{})
-    end.
 
 stop(Pids) ->
     lists:foreach(
@@ -99,27 +58,3 @@ stop(Pids) ->
         end,
         Pids
     ).
-
-%%% ============ Versiones y conflictos ============
-
-nueva_version() ->
-    erlang:unique_integer([monotonic]).
-
-replicar(Peers, Key, Entry) ->
-    lists:foreach(fun(Pid) -> Pid ! {replica, Key, Entry} end, Peers).
-
-merge(Key, {VersionNueva, _} = Nueva, Map) ->
-    case maps:find(Key, Map) of
-        {ok, {VersionActual, _}} when VersionActual >= VersionNueva ->
-            Map;
-        _ ->
-            maps:put(Key, Nueva, Map)
-    end.
-
-%%% ============ TTL ============
-
-expira(infinity) -> infinity;
-expira(Time) -> erlang:monotonic_time(millisecond) + Time.
-
-vigente(infinity) -> true;
-vigente(Expira) -> erlang:monotonic_time(millisecond) < Expira.

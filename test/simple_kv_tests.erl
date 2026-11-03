@@ -27,6 +27,35 @@ leer_devuelve_not_found_test() ->
     ?assertEqual(not_found, simple_kv:get(Pid, color)),
     simple_kv:stop([Pid]).
 
+escribir_leer_borrar_y_leer_devuelve_not_found_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    ok = simple_kv:put(Pid, color, rojo),
+    ok = simple_kv:delete(Pid, color),
+    ?assertEqual(not_found, simple_kv:get(Pid, color)),
+    simple_kv:stop([Pid]).
+
+start_link_con_numero_negativo_devuelve_error_test() ->
+    ?assertError(function_clause, simple_kv:start_link(-1)).
+
+start_link_con_cero_devuelve_error_test() ->
+    ?assertError(function_clause, simple_kv:start_link(0)).
+
+start_link_con_uno_con_decimal_devuelve_error_test() ->
+    ?assertError(function_clause, simple_kv:start_link(1.0)).
+
+borrar_clave_inexistente_devuelve_ok_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    ?assertEqual(ok, simple_kv:delete(Pid, color)),
+    simple_kv:stop([Pid]).
+
+mensaje_desconocido_es_ignorado_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    Pid ! {mensaje_desconocido123, a, 123},
+    ok = simple_kv:put(Pid, color, rojo),
+    {ok, ColorVal} = simple_kv:get(Pid, color),
+    ?assertEqual(rojo, ColorVal),
+    simple_kv:stop([Pid]).
+
 escribir_con_tiempo_negativo_devuelve_error_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
     try
@@ -60,35 +89,6 @@ escribir_con_float_como_tiempo_devuelve_error_test() ->
         simple_kv:stop([Pid])
     end.
 
-escribir_leer_borrar_y_leer_devuelve_not_found_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    ok = simple_kv:put(Pid, color, rojo),
-    ok = simple_kv:delete(Pid, color),
-    ?assertEqual(not_found, simple_kv:get(Pid, color)),
-    simple_kv:stop([Pid]).
-
-start_link_con_numero_negativo_devuelve_error_test() ->
-    ?assertError(function_clause, simple_kv:start_link(-1)).
-
-start_link_con_cero_devuelve_error_test() ->
-    ?assertError(function_clause, simple_kv:start_link(0)).
-
-start_link_con_uno_con_decimal_devuelve_error_test() ->
-    ?assertError(function_clause, simple_kv:start_link(1.0)).
-
-borrar_clave_inexistente_devuelve_ok_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    ?assertEqual(ok, simple_kv:delete(Pid, color)),
-    simple_kv:stop([Pid]).
-
-mensaje_desconocido_es_ignorado_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
-    Pid ! {mensaje_desconocido123, a, 123},
-    ok = simple_kv:put(Pid, color, rojo),
-    {ok, ColorVal} = simple_kv:get(Pid, color),
-    ?assertEqual(rojo, ColorVal),
-    simple_kv:stop([Pid]).
-
 ttl_cero_reemplaza_valor_anterior_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
     try
@@ -104,7 +104,7 @@ ttl_mayor_a_cero_expira_test() ->
     try
         ok = simple_kv:put(Pid, color, rojo, 300),
         ?assertEqual({ok, rojo}, simple_kv:get(Pid, color)),
-        esperar_valor(Pid, color, not_found,1000)
+        simple_kv_test_utils:esperar_valor(Pid, color, not_found,1000)
     after
         simple_kv:stop([Pid])
     end.
@@ -127,7 +127,7 @@ ttl_infinito_sobrescrito_con_finito_vence_entrada_test() ->
         ok = simple_kv:put(Pid, color, rojo),
         ok = simple_kv:put(Pid, color, azul,300),
         ?assertEqual({ok, azul}, simple_kv:get(Pid, color)),
-        esperar_valor(Pid, color, not_found,1000)
+        simple_kv_test_utils:esperar_valor(Pid, color, not_found,1000)
     after
         simple_kv:stop([Pid])
     end.
@@ -137,49 +137,25 @@ escribir_en_p1_replica_leer_en_p2_test()->
     [Pid1, Pid2, Pid3] = Pids,
     try
         ok = simple_kv:put(Pid1, color, rojo),
-        esperar_valor(Pid2,color,{ok,rojo},1000),
-        esperar_valor(Pid3,color,{ok, rojo},1000)
+        simple_kv_test_utils:esperar_valor(Pid2,color,{ok,rojo},1000),
+        simple_kv_test_utils:esperar_valor(Pid3,color,{ok, rojo},1000)
     after
         simple_kv:stop(Pids)
     end.
-
 
 borrar_en_p2_replica_en_otras_test()->
     {ok, Pids} = simple_kv:start_link(3),
     [Pid1, Pid2, Pid3] = Pids,
     try
         ok = simple_kv:put(Pid1, color, rojo),
-        esperar_valor(Pid2,color,{ok,rojo},1000),
-        esperar_valor(Pid3,color,{ok, rojo},1000),
+        simple_kv_test_utils:esperar_valor(Pid2,color,{ok,rojo},1000),
+        simple_kv_test_utils:esperar_valor(Pid3,color,{ok, rojo},1000),
         ok = simple_kv:delete(Pid2, color),
-        esperar_valor(Pid1, color, not_found, 1000),
-        esperar_valor(Pid3, color, not_found, 1000),
+        simple_kv_test_utils:esperar_valor(Pid1, color, not_found, 1000),
+        simple_kv_test_utils:esperar_valor(Pid3, color, not_found, 1000),
         ok = simple_kv:put(Pid3, color, azul),
-        esperar_valor(Pid2,color,{ok,azul},1000),
-        esperar_valor(Pid1,color,{ok, azul},1000)
+        simple_kv_test_utils:esperar_valor(Pid2,color,{ok,azul},1000),
+        simple_kv_test_utils:esperar_valor(Pid1,color,{ok, azul},1000)
     after
         simple_kv:stop(Pids)
-    end.
-
-%%% utils
-
-obtener_plazo_ms(Ms)->erlang:monotonic_time(millisecond) + Ms.
-
-esperar_valor(Pid, Key, Esperado, Ms) ->
-    Plazo = obtener_plazo_ms(Ms),
-    esperar_valor_hasta(Pid, Key, Esperado, Plazo).
-
-esperar_valor_hasta(Pid, Key, Esperado, Plazo) ->
-    Actual = simple_kv:get(Pid, Key),
-    case Actual =:= Esperado of
-        true ->
-            ok;
-        false ->
-            case erlang:monotonic_time(millisecond) >= Plazo of
-                true ->
-                    ?assertEqual(Esperado, Actual);
-                false ->
-                    timer:sleep(10),
-                    esperar_valor_hasta(Pid, Key, Esperado, Plazo)
-            end
     end.
