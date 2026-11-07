@@ -35,7 +35,6 @@ aplicar_actualizacion(Key, {VersionNueva, Contenido} = Nueva, Map, Metadatos) ->
     case maps:find(Key, Metadatos) of
         {ok, {VersionActual, Estado}} when VersionActual == VersionNueva ->
             %% Misma version: recuperamos el valor solo si estaba desalojado.
-            %% En los demas casos conservamos el mapa sin cambios.
             case {Estado, Contenido} of
                 {desalojado, {value, _, _}} ->
                     maps:put(Key, Nueva, Map);
@@ -48,17 +47,12 @@ aplicar_actualizacion(Key, {VersionNueva, Contenido} = Nueva, Map, Metadatos) ->
         _ ->
             %% No conocemos la clave, o la version recibida es mas nueva.
             case Contenido of
-                %% Borrado explicito: quitamos el valor si estaba almacenado.
-                %% Registrar la marca de borrado corresponde a otra funcion.
                 borrado -> maps:remove(Key, Map);
-                %% Escritura: guardamos o reemplazamos la entrada completa.
-                %% El vencimiento se comprueba al leer, no en esta funcion.
                 {value, _, _} -> maps:put(Key, Nueva, Map)
             end
     end.
 
 %% Compara versiones; una version igual tambien se considera aceptable.
-%% No modifica el estado ni decide si hace falta almacenar el valor.
 -spec es_mensaje_nuevo(
     term(),
     {integer(), term()},
