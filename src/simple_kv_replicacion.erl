@@ -1,11 +1,8 @@
 -module(simple_kv_replicacion).
--export([nueva_version/0, replicar/3, elegir_mayor/2]).
+-export([nueva_version/0, elegir_mayor/2, replicar_delete/3, replicar_put/3]).
 
 nueva_version() ->
     erlang:unique_integer([monotonic]).
-
-replicar(Peers, Key, Entry) ->
-    lists:foreach(fun(Pid) -> Pid ! {replica, Key, Entry} end, Peers).
 
 elegir_mayor(error, Otra) ->
     Otra;
@@ -20,3 +17,9 @@ elegir_mayor({ok, {V1, _}} = Una, {ok, {V2, _}} = Otra) ->
         true -> Una;
         false -> Otra
     end.
+
+replicar_put(Peers, Key, Entry) ->
+    lists:foreach(fun(Pid) -> Pid ! {replica_put, Key, Entry} end, Peers).
+
+replicar_delete(Peers, Key, Entry) ->
+    lists:foreach(fun(Pid) -> Pid ! {replica_delete, Key, Entry} end, Peers).

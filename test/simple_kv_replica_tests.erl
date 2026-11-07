@@ -60,7 +60,7 @@ recepcion_replicada_limita_capacidad_y_no_desaloja_por_duplicados_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
     try
         lists:foreach(
-            fun(N) -> Pid ! {replica, N, {N, {value, N, infinity}}} end,
+            fun(N) -> Pid ! {replica_put, N, {N, {value, N, infinity}}} end,
             lists:seq(1, 17)
         ),
         Antes = [{N, consultar_local(Pid, N)} || N <- lists:seq(1, 17)],
@@ -70,8 +70,8 @@ recepcion_replicada_limita_capacidad_y_no_desaloja_por_duplicados_test() ->
             fun(N) -> ?assertEqual({ok, {N, {value, N, infinity}}}, proplists:get_value(N, Antes)) end,
             lists:seq(6, 17)
         ),
-        Pid ! {replica, 17, {17, {value, 17, infinity}}},
-        Pid ! {replica, 17, {0, {value, obsoleto, infinity}}},
+        Pid ! {replica_put, 17, {17, {value, 17, infinity}}},
+        Pid ! {replica_put, 17, {0, {value, obsoleto, infinity}}},
         Despues = [{N, consultar_local(Pid, N)} || N <- lists:seq(1, 17)],
         ?assertEqual(Antes, Despues)
     after
@@ -88,9 +88,9 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
     Pid = spawn_link(fun simple_kv_replica:init/0),
     Pid ! {peers, [Peer]},
     try
-        Pid ! {replica, 1, Entry},
+        Pid ! {replica_put, 1, Entry},
         lists:foreach(
-            fun(N) -> Pid ! {replica, N, {N, {value, N, infinity}}} end,
+            fun(N) -> Pid ! {replica_put, N, {N, {value, N, infinity}}} end,
             lists:seq(2, 17)
         ),
         ?assertEqual({ok, {1, desalojado}}, consultar_local(Pid, 1)),
@@ -107,8 +107,8 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
 mensaje_viejo_no_resucita_borrado_test() ->
     {ok, [Pid]} = simple_kv:start_link(1),
     try
-        Pid ! {replica, color, {20, borrado}},
-        Pid ! {replica, color, {10, {value, rojo, infinity}}},
+        Pid ! {replica_delete, color, {20, borrado}},
+        Pid ! {replica_put, color, {10, {value, rojo, infinity}}},
         ?assertEqual({ok, {20, borrado}}, consultar_local(Pid, color)),
         ?assertEqual(not_found, simple_kv:get(Pid, color))
     after
@@ -121,10 +121,10 @@ ordenes_opuestos_convergen_a_misma_version_test() ->
     Vieja = {10, {value, rojo, infinity}},
     Nueva = {20, {value, azul, infinity}},
     try
-        P1 ! {replica, color, Vieja},
-        P1 ! {replica, color, Nueva},
-        P2 ! {replica, color, Nueva},
-        P2 ! {replica, color, Vieja},
+        P1 ! {replica_put, color, Vieja},
+        P1 ! {replica_put, color, Nueva},
+        P2 ! {replica_put, color, Nueva},
+        P2 ! {replica_put, color, Vieja},
         ?assertEqual({ok, Nueva}, consultar_local(P1, color)),
         ?assertEqual({ok, Nueva}, consultar_local(P2, color))
     after
@@ -247,4 +247,16 @@ retener_consultas(Padre, Marca, Acumuladas) ->
             lists:foreach(fun({P, R}) ->
                 P ! {respuesta_consulta, R, self(), error}
             end, Acumuladas)
+    end.
+
+delete_replicado_viejo_conserva_valor_nuevo_test() ->
+    {ok, [Pid]} = simple_kv:start_link(1),
+    Entry = {20, {value, azul, infinity}},
+    try
+        Pid ! {replica_put, color, Entry},
+        Pid ! {replica_delete, color, {10, borrado}},
+        ?assertEqual({ok, Entry}, consultar_local(Pid, color)),
+        ?assertEqual({ok, azul}, simple_kv:get(Pid, color))
+    after
+        simple_kv:stop([Pid])
     end.

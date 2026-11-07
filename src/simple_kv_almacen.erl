@@ -1,5 +1,5 @@
 -module(simple_kv_almacen).
--export([buscar_local/3, registrar_metadata/3, aplicar_actualizacion/4, es_mensaje_nuevo/3]).
+-export([buscar_local/3, registrar_metadata/3, aplicar_actualizacion/4, es_mensaje_nuevo/3, actualizar_estado_por_delete_replicado/4, actualizar_estado_por_put_replicado/4]).
 
 buscar_local(Key, Map, Metadatos) ->
     case maps:find(Key, Metadatos) of
@@ -26,6 +26,49 @@ registrar_metadata(Key, {Version, Contenido}, Metadatos) ->
             Metadatos;
         _ ->
             maps:put(Key, {Version, Estado}, Metadatos)
+    end.
+
+-spec actualizar_estado_por_delete_replicado(term(), {integer(), borrado}, map(), map()) ->
+    {map(), map()}.
+actualizar_estado_por_delete_replicado(Key, {_, borrado} = Entry, Map, Metadatos) ->
+    {aplicar_actualizacion(Key, Entry, Map, Metadatos),
+     registrar_metadata(Key, Entry, Metadatos)}.
+
+-spec actualizar_estado_por_put_replicado(
+    term(), {integer(), {value, term(), integer() | infinity}}, map(), map()
+) -> {map(), map()}.
+actualizar_estado_por_put_replicado(Key, {_, {value, _, _}} = Entry, Map, Metadatos) ->
+    case es_mensaje_nuevo(Key, Entry, Metadatos) of
+        true ->
+            %% Conservamos version y vencimiento recibidos.
+            %% Aplicar primero permite distinguir una insercion
+            %% de una sobrescritura o un duplicado sin cambios.
+            MapActualizado = aplicar_actualizacion(
+                Key, Entry, Map, Metadatos
+            ),
+            MetadatosActualizados = registrar_metadata(
+                Key, Entry, Metadatos
+            ),
+            case simple_kv_capacidad:estado_capacidad(MapActualizado) of
+                {excedida, _} ->
+                    %% El candidato incluye la entrada recibida:
+                    %% puede ser mas vieja que las conservadas.
+                    %% PENDIENTE: ofrecer a pares antes de desalojar.
+                    case simple_kv_capacidad:candidato_a_desalojar(MapActualizado) of
+                        ninguno ->
+                            erlang:error(capacidad_llena_sin_candidato);
+                        {KeyDesalojada, _} ->
+                            simple_kv_capacidad:desalojar(
+                                KeyDesalojada,
+                                MapActualizado,
+                                MetadatosActualizados
+                            )
+                    end;
+                _ ->
+                    {MapActualizado, MetadatosActualizados}
+            end;
+        false ->
+            {Map, Metadatos}
     end.
 
 %% Devuelve el mapa de valores resultante; NO modifica los metadatos.
@@ -66,6 +109,8 @@ aplicar_actualizacion(Key, {VersionNueva, Contenido} = Nueva, Map, Metadatos) ->
 ) -> boolean().
 es_mensaje_nuevo(Key, {VersionNueva, _Contenido}, Metadatos) ->
     case maps:find(Key, Metadatos) of
+        % probablemente un put
         error -> true;
-        {ok, {VersionActual, _Estado}} -> VersionNueva >= VersionActual
+        % put o delete
+        {ok, {VersionActual, _}} -> VersionNueva >= VersionActual
     end.
