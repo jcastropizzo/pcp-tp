@@ -4,7 +4,7 @@
 %% Una sola replica: un get no puede recuperar el dato desde otro proceso.
 %% Sin TTL ni delete: la desaparicion esperada corresponde al desalojo.
 diecisiete_claves_desalojan_una_en_replica_unica_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
+    {ok, [Pid]} = simple_kv:start_link(1, 16),
     try
         lists:foreach(
             fun(N) ->
@@ -41,7 +41,7 @@ diecisiete_claves_desalojan_una_en_replica_unica_test() ->
 
 %% Regresion de capacidad mediante API publica, sin pares que oculten un desalojo.
 sobrescritura_con_capacidad_llena_no_desaloja_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
+    {ok, [Pid]} = simple_kv:start_link(1, 16),
     try
         lists:foreach(fun(N) -> ok = simple_kv:put(Pid, N, N) end, lists:seq(1, 16)),
         ok = simple_kv:put(Pid, 16, reemplazo),
@@ -57,7 +57,7 @@ sobrescritura_con_capacidad_llena_no_desaloja_test() ->
 %% Prueba interna: inyecta mensajes de replicacion y consulta estado LOCAL.
 %% get/2 podria recuperar datos de pares y ocultar exceso de almacenamiento.
 recepcion_replicada_limita_capacidad_y_no_desaloja_por_duplicados_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
+    {ok, [Pid]} = simple_kv:start_link(1, 16),
     try
         lists:foreach(
             fun(N) -> Pid ! {replica, N, {N, {value, N, infinity}}} end,
@@ -86,7 +86,7 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
     Entry = {1, {value, remoto, infinity}},
     Peer = spawn(fun() -> par_controlado(Padre, Marca, #{1 => Entry}) end),
     Pid = spawn_link(fun simple_kv_replica:init/0),
-    Pid ! {peers, [Peer]},
+    Pid ! {peers, [Peer], 16},
     try
         Pid ! {replica, 1, Entry},
         lists:foreach(
@@ -105,7 +105,7 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
 
 %% Prueba interna: entrega primero un borrado y luego una escritura anterior.
 mensaje_viejo_no_resucita_borrado_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1),
+    {ok, [Pid]} = simple_kv:start_link(1, 16),
     try
         Pid ! {replica, color, {20, borrado}},
         Pid ! {replica, color, {10, {value, rojo, infinity}}},
@@ -117,7 +117,7 @@ mensaje_viejo_no_resucita_borrado_test() ->
 
 %% Prueba interna: fuerza los dos ordenes de entrega en replicas reales.
 ordenes_opuestos_convergen_a_misma_version_test() ->
-    {ok, [P1, P2] = Pids} = simple_kv:start_link(2),
+    {ok, [P1, P2] = Pids} = simple_kv:start_link(2, 16),
     Vieja = {10, {value, rojo, infinity}},
     Nueva = {20, {value, azul, infinity}},
     try
@@ -134,7 +134,7 @@ ordenes_opuestos_convergen_a_misma_version_test() ->
 %% API publica: dos clientes se liberan juntos. No fija el ganador ni garantiza
 %% que cada ejecucion fuerce desconocimiento mutuo entre escrituras.
 escritores_concurrentes_convergen_test() ->
-    {ok, [P1, P2, _] = Pids} = simple_kv:start_link(3),
+    {ok, [P1, P2, _] = Pids} = simple_kv:start_link(3, 16),
     Padre = self(),
     Marca = make_ref(),
     Clientes = [spawn(fun() ->
@@ -165,8 +165,8 @@ consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
     Gate = spawn(fun() -> retener_consultas(Padre, Marca, []) end),
     P1 = spawn_link(fun simple_kv_replica:init/0),
     P2 = spawn_link(fun simple_kv_replica:init/0),
-    P1 ! {peers, [P2, Gate]},
-    P2 ! {peers, [P1, Gate]},
+    P1 ! {peers, [P2, Gate], 16},
+    P2 ! {peers, [P1, Gate], 16},
     Clientes = [spawn(fun() ->
         Resultado = simple_kv:get(Pid, {ausente, N}),
         Padre ! {Marca, lectura, N, Resultado}

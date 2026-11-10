@@ -200,7 +200,7 @@ oferta_vieja_no_revive_borrado_test() ->
 lee_valor_desalojado_desde_otra_replica_test() ->
     Rep = replica_con_par_falso(3),
     poner_varios(Rep, [1, 2, 3, 4]),
-    Entry1 = receive {replica, 1, E} -> E after 1000 -> erlang:error(sin_replica) end,
+    Entry1 = receive {ofrecer, 1, E} -> E after 1000 -> erlang:error(sin_oferta) end,
     ok = get_async(Rep, 1),
     {Rep, ConsultaRef} = esperar_consulta(1),
     ok = responder_consulta(Rep, ConsultaRef, {ok, Entry1}),
