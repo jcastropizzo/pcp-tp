@@ -4,13 +4,27 @@ Almacén Erlang entre procesos de una misma VM BEAM. Requisitos: [consigna V5](c
 
 **Entrega:** 11/11/2026 a las 23:59, mediante push al repositorio asignado por la cátedra. **Coloquio:** 18/11/2026, a coordinar con cada grupo.
 
+## Requisitos del trabajo práctico
+
+La [consigna V5](consigna/kv_replicado.pdf) es la fuente normativa. El checklist posterior distingue el estado de esta implementación; una decisión de diseño o un test aprobado no reemplaza un requisito de la consigna.
+
+- **API (§3):** conservar las firmas de `start_link/2`, `stop/1`, `put/3`, `put/4`, `delete/2` y `get/2`. La API puede extenderse. `start_link` crea procesos enlazados y valida `Count`; `put/4` valida TTL en el invocante; `stop` retorna cuando terminaron todas las réplicas.
+- **Replicación y consistencia (§4.2–4.5):** propagar cada escritura y borrado asincrónicamente, sin esperar su aplicación en los pares. Al cesar las escrituras las réplicas deben converger; resolver conflictos concurrentes sin depender del orden de llegada y evitar que un mensaje viejo resucite un borrado.
+- **TTL (§4.6):** `infinity` no vence; `0` vence inmediatamente; nunca devolver un valor vencido. Un TTL inválido falla con `function_clause` en el proceso invocante.
+- **Capacidad (§4.7):** cada réplica admite como máximo α valores, sin entradas adicionales en estructuras secundarias; se puede asumir α ≥ 3. La consigna exige que el 75 % escrito más recientemente **en el nodo local** siga disponible. Antes de descartar un valor vigente, dar a los pares oportunidad de conservarlo mediante un intercambio que termine. La pérdida es admisible en el peor caso indicado por la consigna.
+- **Lectura y concurrencia (§4.8 y §5):** si falta información local, considerar la de las demás réplicas; asociar respuestas a pedidos, descartar mensajes inesperados y evitar deadlocks. Una réplica que espera información debe seguir atendiendo pedidos. El orden entre emisores distintos no está garantizado.
+- **Restricciones y supuestos (§6–7):** sin behaviours OTP, ETS, DETS, Mnesia, `persistent_term` ni diccionario de proceso; estado en los argumentos del ciclo; compilación sin advertencias. Una VM BEAM, procesos sin fallas y una sola llamada final a `stop/1` con todos los identificadores.
+- **Entrega (§8):** código `.erl`, tests propios que muestren los comportamientos mediante la interfaz externa y documento de diseño de hasta cinco páginas. Hacer push al repositorio asignado por la cátedra, con ambos integrantes y cuentas informadas a docentes.
+
+El informe debe explicar la estructura de cada réplica; incluir una **tabla de todos los mensajes** con emisor, receptor, contenido y efecto; justificar conflictos y borrados; describir detección de TTL; justificar la política de desalojo y la terminación de sus mensajes; y explicar el `get` remoto y por qué no produce deadlock.
+
 ## Qué hay y qué falta
 
 Selector corregido y pruebas actualizadas. El cierre integral de convergencia sigue pendiente por los casos de borrado/TTL indicados abajo. Compilación estricta y **94 tests aprobados**, incluyendo protección por recencia frente a TTL, capacidad bajo tráfico remoto, cierre lento y consultas simultáneas.
 
 **Pendiente de los integrantes:** confirmar cuentas informadas a docentes, llevar los archivos al repositorio asignado y verificar el push final. Este es un repositorio privado de trabajo: publicar aquí no constituye la entrega.
 
-Los checks indican comportamiento implementado con evidencia de código/pruebas o argumento en el informe. Una suite finita no demuestra todos los intercalados concurrentes.
+Los checks señalan funciones implementadas o casos probados, no certifican el cumplimiento integral del requisito. En particular, convergencia y la interpretación del 75 % local siguen pendientes. Una suite finita no demuestra todos los intercalados concurrentes.
 
 ## Política de desalojo: recencia protegida y TTL
 
@@ -77,9 +91,9 @@ Los tests citan la consigna y separan visibilidad por API de almacenamiento fís
 
 ### Replicación, conflictos y borrados — §4.2–4.5
 
-- [x] Puts/deletes se propagan a todos los pares sin esperar confirmaciones.
+- [x] Implementación: puts/deletes se propagan a todos los pares sin esperar confirmaciones.
 - [x] Cada escritura obtiene una versión única creciente dentro de la VM; replicaciones y ofertas la conservan.
-- [x] Gana la versión mayor independientemente del orden de llegada. Pruebas con órdenes opuestos y escritores concurrentes.
+- [x] En los escenarios probados, gana la versión mayor independientemente del orden de llegada; hay pruebas con órdenes opuestos y escritores concurrentes.
 - [x] Lápidas con versión impiden resurrección por puts antiguos; un delete viejo tampoco elimina un valor nuevo.
 - [x] Desalojo local y borrado se distinguen en metadatos. Un desalojado se puede recuperar con una copia de igual versión.
 - [ ] Completar la justificación de igualdad final de mapas incluyendo borrados, TTL y recuperación tras desalojo. El informe distingue el caso demostrado de los casos abiertos.
@@ -140,7 +154,8 @@ rebar3 eunit
 
 ## Documentación y entrega — §8
 
-- [x] Implementación `.erl` y tests propios presentes.
+- [x] Implementación `.erl` y tests propios presentes. Hay tests internos del protocolo que complementan las pruebas por API.
+- [ ] Verificar cobertura de todos los comportamientos exigidos mediante la interfaz externa; los tests internos por sí solos no la acreditan.
 - [x] Informe actualizado con estructuras y protocolo reales, tabla de mensajes y alcance de las garantías verificadas. Convergencia integral pendiente según el caso documentado.
 - [x] PDF actualizado de cinco páginas, generado y revisado visualmente.
 - [x] Compilación y suite verificadas sobre los archivos finales de la rama de trabajo.
