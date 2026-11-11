@@ -20,11 +20,11 @@ El informe debe explicar la estructura de cada réplica; incluir una **tabla de 
 
 ## Qué hay y qué falta
 
-Selector corregido y pruebas actualizadas. El cierre integral de convergencia sigue pendiente por los casos de borrado/TTL indicados abajo. Compilación estricta y **94 tests aprobados**, incluyendo protección por recencia frente a TTL, capacidad bajo tráfico remoto, cierre lento y consultas simultáneas.
+Un coordinador ordena escrituras y ofertas y comunica a todas las réplicas una única decisión de capacidad. La respuesta al cliente espera la aplicación en la réplica elegida, pero no en sus pares. Compilación estricta y **100 tests aprobados**, incluyendo réplicas atrasadas, TTL y ofertas coordinadas.
 
 **Pendiente de los integrantes:** confirmar cuentas informadas a docentes, llevar los archivos al repositorio asignado y verificar el push final. Este es un repositorio privado de trabajo: publicar aquí no constituye la entrega.
 
-Los checks señalan funciones implementadas o casos probados, no certifican el cumplimiento integral del requisito. En particular, convergencia y la interpretación del 75 % local siguen pendientes. Una suite finita no demuestra todos los intercalados concurrentes.
+Los checks señalan funciones implementadas o casos probados, no certifican el cumplimiento integral del requisito. En particular, debe revisarse la garantía del 75 % frente a todos los metadatos registrados y confirmar la interpretación con la cátedra. Una suite finita no demuestra todos los intercalados concurrentes.
 
 ## Política de desalojo: recencia protegida y TTL
 
@@ -40,24 +40,24 @@ Fuente: [consigna V5, §§4.6–4.7](consigna/kv_replicado.pdf). Citas textuales
 
 ### Árbol de decisión para put y replicación
 
-1. Descartar versiones anteriores a la conocida. Una sobrescritura aceptable reemplaza su clave sin desalojar otra.
+1. La réplica deriva el pedido al coordinador, que asigna versión y decide una sola vez. Para entradas recibidas, descarta versiones anteriores a la conocida. Una sobrescritura aceptable reemplaza su clave sin desalojar otra.
 2. Si `map_size(Map) < α`, guardar la entrada, **incluso si ya venció**. Vencido no implica borrado físico ni vacante automática.
 3. Si no hay espacio, considerar residentes más entrante sin construir otro mapa de valores. Proteger las Q versiones mayores, incluido el entrante si le corresponde.
 4. Entre los **no protegidos**, elegir primero un vencido; si hay varios, el de menor versión. Si ninguno venció, elegir la menor versión elegible.
-5. El candidato puede ser el entrante. Si sale un residente, retirarlo antes de insertar para no superar α. Antes de descartar un vigente, ofrecerlo a los pares; un vencido no se ofrece.
+5. El candidato puede ser el entrante. El coordinador ordena su decisión a todas las réplicas. Si sale un residente, cada réplica lo retira antes de insertar para no superar α. Cada réplica ofrece el valor a los pares antes de descartarlo si sigue vigente; un vencido no se ofrece.
 6. Conservar versión y estado `desalojado` al descartar. TTL no fabrica una lápida `borrado`; esa marca corresponde a `delete` explícito, que sí puede quitar una entrada protegida.
 
 La preferencia por vencidos solo opera fuera del cupo protegido: **no es una política top-α pura cuando hay TTL**. Por ejemplo, α=4, versiones 1 vigente, 2 vencida, 3 y 4 vigentes, entrante 5: se protegen 3,4,5 y se retira 2, conservando 1.
 
 ### Ofertas y lecturas
 
-Una oferta puede ocupar una vacante, reemplazar su clave o reutilizar un vencido no protegido mediante el mismo ranking. Nunca desaloja vigentes ni genera otros mensajes. Una oferta rechazada no limpia entradas protegidas como efecto lateral. Si se conserva una copia vencida, mantiene su vencimiento y sigue siendo invisible para `get`.
+Cada réplica ofrece a sus pares un valor vigente antes de descartarlo. Los receptores proponen la oferta al coordinador; este la procesa en el mismo orden global que las escrituras y distribuye su decisión a todas las réplicas. Una oferta puede ocupar una vacante, reemplazar su clave o reutilizar un vencido no protegido. No desaloja vigentes ni origina nuevas ofertas, de modo que el intercambio termina. Si se conserva una copia vencida, mantiene su vencimiento y sigue siendo invisible para `get`.
 
 Las lecturas no quitan las entradas vencidas del mapa. La comprobación final de TTL en el cliente evita devolverlas incluso si vencieron mientras faltaban respuestas remotas.
 
 ### Verificación del criterio
 
-Los tests citan la consigna y separan visibilidad por API de almacenamiento físico mediante consultas locales. Suite específica: `test/simple_kv_proteccion_ttl_tests.erl`.
+Los tests citan la consigna y separan visibilidad por API de almacenamiento físico mediante consultas locales. Suite específica: `test/simple_kv_proteccion_ttl_tests.erl`; el orden del coordinador se prueba en `test/simple_kv_coordinador_tests.erl`.
 
 | Caso | Resultado exigido |
 | --- | --- |
@@ -69,14 +69,16 @@ Los tests citan la consigna y separan visibilidad por API de almacenamiento fís
 | Replicación, ofertas y sobrescrituras | No limpian protegidos; no renuevan TTL ni crean borrados por vencer |
 | `delete` explícito | Elimina y deja lápida aunque la entrada estuviera protegida |
 
-### Convergencia pendiente
+### Orden y convergencia
 
-**Convergencia significa mapas iguales**, no solo acuerdo sobre versiones. Con puts de claves distintas y TTL infinito, se conserva el mismo top-α tras recibir las mismas escrituras. Hay pruebas que comparan contenido local, sin `get/2`, que podría ocultar diferencias consultando un par.
+**Convergencia significa mapas iguales.** Cada `put` o `delete` se envía al coordinador, que asigna versión y calcula una sola vez la decisión de capacidad usando su índice de claves, versiones y vencimientos. No conserva valores de usuario en su estado. Envía el mismo evento ordenado a todas las réplicas; la réplica que recibió el pedido responde al cliente al aplicar su evento, sin esperar a los pares.
 
-- [x] Proteger por recencia sin excepción de origen y conservar físicamente protegidos vencidos.
-- [x] Priorizar vencidos exclusivamente entre no protegidos, incluyendo al entrante.
-- [ ] Cerrar convergencia con borrados, sobrescrituras y TTL. Caso comprobado, α=3: `a1,b2,c3,d4,delete(d)5` deja `{b,c}`; `delete(d)5,a1,b2,c3,d4` deja `{a,b,c}`. El selector no recupera copias descartadas cuando aparece una vacante. La preferencia por vencidos puede además depender del instante de recepción.
-- [ ] Confirmar con cátedra la interpretación de «en el nodo local» frente a igualdad final de mapas: no se garantiza un cupo independiente por origen.
+Las ofertas recibidas también se proponen al coordinador. Sus decisiones se emiten en el mismo flujo; una oferta aplicada no genera nuevas ofertas. Las réplicas no recalculan la víctima con su propio reloj al aplicar un evento. Como todos los eventos salen del mismo proceso, cada réplica los recibe en el mismo orden. Si cesan las escrituras y se procesan los mensajes, aplican las mismas transiciones a partir del mismo estado inicial. En particular, el antiguo contraejemplo de `put(d)` y `delete(d)` se ordena igual en todas. Una oferta pendiente puede volver a incorporar una copia cuando queda espacio, pero esa decisión también se aplica a todas.
+
+- [x] Pruebas de réplica pausada durante puts/delete, aceptación de oferta coordinada y decisión de TTL aplicada después del vencimiento. Se comparan entradas locales completas, incluidas versiones y vencimientos.
+- [x] La escritura termina en la réplica de origen incluso con otro nodo pausado; el coordinador termina después de detener la última réplica.
+- [ ] Revisar la garantía del 75 % cuando hay metadatos de entradas desalojadas y borrados, y contrastar con cátedra la interpretación de «registro local». El selector actual ordena residentes más entrante, sin cupos independientes por origen.
+- [ ] Completar la revisión de todos los intercalados y de la cobertura por interfaz pública. La prueba de un escenario y el orden común no sustituyen una revisión completa de la consigna.
 
 ## Checklist de requisitos V5
 
@@ -96,7 +98,8 @@ Los tests citan la consigna y separan visibilidad por API de almacenamiento fís
 - [x] En los escenarios probados, gana la versión mayor independientemente del orden de llegada; hay pruebas con órdenes opuestos y escritores concurrentes.
 - [x] Lápidas con versión impiden resurrección por puts antiguos; un delete viejo tampoco elimina un valor nuevo.
 - [x] Desalojo local y borrado se distinguen en metadatos. Un desalojado se puede recuperar con una copia de igual versión.
-- [ ] Completar la justificación de igualdad final de mapas incluyendo borrados, TTL y recuperación tras desalojo. El informe distingue el caso demostrado de los casos abiertos.
+- [x] El coordinador emite escrituras y ofertas en un orden común y decide una única víctima. Pruebas comparan mapas completos tras borrado, TTL y ofertas.
+- [ ] Revisar el argumento de convergencia bajo todos los intercalados y su interacción con el 75 % registrado localmente.
 
 ### TTL — §4.6
 
@@ -108,11 +111,11 @@ Los tests citan la consigna y separan visibilidad por API de almacenamiento fís
 ### Capacidad y desalojo — §4.7
 
 - [x] Capacidad α recibida al iniciar; mapa con como máximo α valores. Se reserva espacio antes de insertar.
-- [x] Sin copias de valores en estructuras secundarias de las réplicas: `Pendientes` contiene solo control de consultas. La reducción de resultados se realiza en el cliente.
+- [x] `Pendientes` contiene solo control de consultas. El coordinador conserva versiones y vencimientos, sin valores de usuario persistentes; los valores viajan en mensajes. La reducción de lecturas se realiza en el cliente.
 - [x] Proteger Q = ceil(3α/4) versiones mayores, con entrante incluido; entre el resto priorizar vencidos y luego menor versión. Sin cupos por origen.
 - [x] Sobrescritura llena sin desalojar otra clave; selector por versión con varios `infinity`; capacidad receptora y duplicados.
 - [x] Valores vigentes ofrecidos a todos los pares antes de descartarlos.
-- [x] Ofertas con versión aceptable: usan vacante, reemplazo o vencido no protegido; nunca desalojan vigentes ni reenvían. Conservan TTL incluso si expiró en tránsito.
+- [x] Las ofertas se ordenan mediante el coordinador: usan vacante, reemplazo o vencido no protegido; su aplicación no genera nuevas ofertas ni desaloja vigentes. Conservan TTL incluso si expiró en tránsito.
 - [x] Pruebas de límite y selección para α de 3 a 16, tres órdenes de entrega, desplazamiento de valores locales por remotos y mapas iguales con escritores concurrentes. Pruebas funcionales de deletes, TTL y sobrescrituras.
 
 ### Lecturas y concurrencia — §4.8 y §5
@@ -140,12 +143,13 @@ rebar3 compile
 rebar3 eunit
 ```
 
-**Verificación del 10/11/2026:** ambos comandos aprobados y **94/94 tests EUnit**; compilación adicional con `erlc +warn_all -Werror` aprobada. Los tests combinan API pública con pruebas internas que fuerzan órdenes concretos. No distribuir `.beam` ni `_build/`: son productos generados y pueden ocultar fuentes actuales.
+**Verificación del 10/11/2026:** ambos comandos aprobados y **100/100 tests EUnit**; compilación adicional con `erlc +warn_all -Werror` aprobada. Los tests combinan API pública con pruebas internas que fuerzan órdenes concretos. No distribuir `.beam` ni `_build/`: son productos generados y pueden ocultar fuentes actuales.
 
 | Archivo | Responsabilidad |
 | --- | --- |
 | `src/simple_kv.erl` | API, reducción de lectura en cliente, creación y cierre |
-| `src/simple_kv_replica.erl` | Ciclo de mensajes y control de consultas pendientes |
+| `src/simple_kv_replica.erl` | Aplica eventos ordenados y atiende lecturas y ofertas |
+| `src/simple_kv_coordinador.erl` | Ordena escrituras, ofertas y barreras; mantiene solo metadatos |
 | `src/simple_kv_almacen.erl` | Metadatos y aplicación de versiones |
 | `src/simple_kv_replicacion.erl` | Versiones, propagación, ofertas y selección de respuestas |
 | `src/simple_kv_capacidad.erl` | Reserva de espacio, protección por recencia, ofertas y desalojo |
@@ -156,7 +160,8 @@ rebar3 eunit
 
 - [x] Implementación `.erl` y tests propios presentes. Hay tests internos del protocolo que complementan las pruebas por API.
 - [ ] Verificar cobertura de todos los comportamientos exigidos mediante la interfaz externa; los tests internos por sí solos no la acreditan.
-- [x] Informe actualizado con estructuras y protocolo reales, tabla de mensajes y alcance de las garantías verificadas. Convergencia integral pendiente según el caso documentado.
+- [x] Informe actualizado con coordinador, tabla de mensajes y argumento de orden.
+- [ ] Revisar la garantía del 75 % sobre los metadatos registrados y la cobertura integral por API pública.
 - [x] PDF actualizado de cinco páginas, generado y revisado visualmente.
 - [x] Compilación y suite verificadas sobre los archivos finales de la rama de trabajo.
 - [x] Cuentas `jcastropizzo` y `mariancarr` con acceso al repositorio privado de trabajo; eso no verifica acceso al repositorio de la cátedra ni inscripción de cuentas.

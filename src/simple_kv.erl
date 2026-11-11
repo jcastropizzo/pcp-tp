@@ -55,10 +55,14 @@ start_link(N, Alfa) when is_integer(N), N >= 1, is_integer(Alfa), Alfa >= 3 ->
         fun(_) -> spawn_link(fun() -> simple_kv_replica:init() end) end,
         lists:seq(1, N)
     ),
+    Coordinador = spawn_link(fun() -> simple_kv_coordinador:init(Pids, Alfa) end),
+    Inicializacion = make_ref(),
     lists:foreach(
-        fun(Pid) -> Pid ! {peers, lists:delete(Pid, Pids), Alfa} end,
+        fun(Pid) -> Pid ! {peers, lists:delete(Pid, Pids), Alfa, Coordinador,
+                           self(), Inicializacion} end,
         Pids
     ),
+    lists:foreach(fun(Pid) -> receive {Inicializacion, Pid} -> ok end end, Pids),
     {ok, Pids}.
 
 stop(Pids) ->
