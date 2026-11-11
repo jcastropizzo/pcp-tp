@@ -104,22 +104,21 @@ delete_libera_lugar_test() ->
     ?assertEqual(not_found, simple_kv:get(P, 1)),
     ok = simple_kv:stop([P]).
 
-%% Los vencidos salen antes que los vigentes, aunque tengan version mas alta.
-%% 'b' es el de menor version, pero se conserva porque sale 'a', que vencio.
-vencidos_se_desalojan_primero_test() ->
+%% Entre los elegibles, se desaloja el vencido antes que el vigente mas viejo.
+vencidos_no_protegidos_se_desalojan_primero_test() ->
     [P] = iniciar(1, 4),
-    ok = simple_kv:put(P, b, 1),
-    ok = simple_kv:put(P, c, 2),
-    ok = simple_kv:put(P, d, 3),
-    ok = simple_kv:put(P, a, 0, 50),
-    timer:sleep(100),
-    ok = simple_kv:put(P, e, 4),
-    ?assertEqual({ok, 1}, simple_kv:get(P, b)),
-    ?assertEqual({ok, 2}, simple_kv:get(P, c)),
-    ?assertEqual({ok, 3}, simple_kv:get(P, d)),
-    ?assertEqual({ok, 4}, simple_kv:get(P, e)),
-    ?assertEqual(not_found, simple_kv:get(P, a)),
-    ok = simple_kv:stop([P]).
+    try
+        ok = simple_kv:put(P, a, 1),
+        ok = simple_kv:put(P, b, 2, 0),
+        ok = simple_kv:put(P, c, 3),
+        ok = simple_kv:put(P, d, 4),
+        ok = simple_kv:put(P, e, 5),
+        ?assertEqual(not_found, simple_kv:get(P, b)),
+        lists:foreach(fun({K, V}) -> ?assertEqual({ok, V}, simple_kv:get(P, K)) end,
+                      [{a, 1}, {c, 3}, {d, 4}, {e, 5}])
+    after
+        simple_kv:stop([P])
+    end.
 
 %% Alfa invalido: falla en el proceso que llama. El minimo es 3 (4.7).
 alfa_invalido_test() ->

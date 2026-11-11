@@ -54,7 +54,6 @@ stop(Pids) ->
             Pid ! stop,
             receive
                 {'DOWN', Monitor, process, Pid, _Motivo} -> ok
-            after 1000 -> erlang:error(timeout)
             end
         end,
         Pids
