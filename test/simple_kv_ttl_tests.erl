@@ -2,7 +2,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 infinity_no_vence_test() ->
-    ?assertEqual(infinity, simple_kv_ttl:expira(infinity)),
+    ?assertEqual(infinity, simple_kv_ttl:calcular_vencimiento(infinity)),
     ?assert(simple_kv_ttl:vigente(infinity)).
 
 instante_pasado_no_esta_vigente_test() ->
@@ -10,4 +10,4 @@ instante_pasado_no_esta_vigente_test() ->
     ?assertNot(simple_kv_ttl:vigente(Pasado)).
 
 ttl_cero_nace_vencido_test() ->
-    ?assertNot(simple_kv_ttl:vigente(simple_kv_ttl:expira(0))).
+    ?assertNot(simple_kv_ttl:vigente(simple_kv_ttl:calcular_vencimiento(0))).

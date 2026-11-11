@@ -137,7 +137,7 @@ versiones_remotas_desplazan_todas_las_locales_antiguas_test() ->
 
 %% El resultado de un get pendiente ignora referencias ajenas, pares ajenos y duplicados.
 consultas_filtran_respuestas_ajenas_y_duplicadas_test() ->
-    con_lectura_retenida(fun(P, Consulta, Gate, Cliente) ->
+    con_lectura_retenida(fun(P, Consulta, ParDemorado, Cliente) ->
         Entrada = {1, {value, remoto, infinity}},
         P ! {respuesta_consulta, make_ref(), self(), {ok, {100, borrado}}},
         P ! {respuesta_consulta, Consulta, desconocido, {ok, {100, borrado}}},
@@ -148,20 +148,20 @@ consultas_filtran_respuestas_ajenas_y_duplicadas_test() ->
             {lectura, Cliente, Resultado} -> error({lectura_prematura, Resultado})
         after 20 -> ok
         end,
-        Gate ! liberar,
+        ParDemorado ! liberar,
         ?assertEqual({ok, remoto}, esperar_lectura(Cliente))
     end).
 
 %% Un valor remoto que vence mientras falta otra respuesta no se devuelve.
 valor_remoto_vence_antes_de_finalizar_get_test() ->
-    con_lectura_retenida(fun(P, Consulta, Gate, Cliente) ->
+    con_lectura_retenida(fun(P, Consulta, ParDemorado, Cliente) ->
         Vence = erlang:monotonic_time(millisecond) + 60,
         P ! {respuesta_consulta, Consulta, self(), {ok, {1, {value, temporal, Vence}}}},
         ?assertEqual(error, consultar_local(P, barrera)),
         Restante = Vence - erlang:monotonic_time(millisecond),
         ?assert(Restante > 0),
         timer:sleep(Restante + 20),
-        Gate ! liberar,
+        ParDemorado ! liberar,
         ?assertEqual(not_found, esperar_lectura(Cliente))
     end).
 
@@ -294,9 +294,9 @@ consultar_local(P, Clave) ->
     end.
 
 con_lectura_retenida(Verificar) ->
-    Gate = spawn(fun responder_al_liberar/0),
+    ParDemorado = spawn(fun responder_al_liberar/0),
     P = spawn_link(fun simple_kv_replica:init/0),
-    P ! {peers, [self(), Gate], 3},
+    P ! {peers, [self(), ParDemorado], 3},
     Padre = self(),
     Cliente = spawn(fun() -> Padre ! {lectura, self(), simple_kv:get(P, k)} end),
     try
@@ -304,10 +304,10 @@ con_lectura_retenida(Verificar) ->
             {consultar, P, Ref, k} -> Ref
         after 1000 -> error(sin_consulta)
         end,
-        Verificar(P, Consulta, Gate, Cliente)
+        Verificar(P, Consulta, ParDemorado, Cliente)
     after
         exit(Cliente, kill),
-        exit(Gate, kill),
+        exit(ParDemorado, kill),
         simple_kv:stop([P])
     end.
 

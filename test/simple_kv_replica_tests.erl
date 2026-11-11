@@ -78,17 +78,16 @@ recepcion_replicada_limita_capacidad_y_no_desaloja_por_duplicados_test() ->
         simple_kv:stop([Pid])
     end.
 
-%% Par controlado: fuerza que la unica copia disponible sea remota y que tenga
-%% la MISMA version que la marca local de desalojo. No cambia produccion.
+%% El par controlado conserva la única copia, de igual versión que la marca de desalojo.
 get_recupera_valor_remoto_tras_desalojo_test() ->
     Padre = self(),
     Marca = make_ref(),
-    Entry = {1, {value, remoto, infinity}},
-    Peer = spawn(fun() -> par_controlado(Padre, Marca, #{1 => Entry}) end),
+    Entrada = {1, {value, remoto, infinity}},
+    Par = spawn(fun() -> par_controlado(Padre, Marca, #{1 => Entrada}) end),
     Pid = spawn_link(fun simple_kv_replica:init/0),
-    Pid ! {peers, [Peer], 16},
+    Pid ! {peers, [Par], 16},
     try
-        Pid ! {replica, 1, Entry},
+        Pid ! {replica, 1, Entrada},
         lists:foreach(
             fun(N) -> Pid ! {replica, N, {N, {value, N, infinity}}} end,
             lists:seq(2, 17)
@@ -100,7 +99,7 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
         end
     after
         simple_kv:stop([Pid]),
-        exit(Peer, kill)
+        exit(Par, kill)
     end.
 
 %% Prueba interna: entrega primero un borrado y luego una escritura anterior.
@@ -131,8 +130,7 @@ ordenes_opuestos_convergen_a_misma_version_test() ->
         simple_kv:stop(Pids)
     end.
 
-%% API publica: dos clientes se liberan juntos. No fija el ganador ni garantiza
-%% que cada ejecucion fuerce desconocimiento mutuo entre escrituras.
+%% Dos clientes arrancan juntos. La prueba espera acuerdo observable en un valor escrito.
 escritores_concurrentes_convergen_test() ->
     {ok, [P1, P2, _] = Pids} = simple_kv:start_link(3, 16),
     Padre = self(),
@@ -162,11 +160,11 @@ escritores_concurrentes_convergen_test() ->
 consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
     Padre = self(),
     Marca = make_ref(),
-    Gate = spawn(fun() -> retener_consultas(Padre, Marca, []) end),
+    ParDemorado = spawn(fun() -> retener_consultas(Padre, Marca, []) end),
     P1 = spawn_link(fun simple_kv_replica:init/0),
     P2 = spawn_link(fun simple_kv_replica:init/0),
-    P1 ! {peers, [P2, Gate], 16},
-    P2 ! {peers, [P1, Gate], 16},
+    P1 ! {peers, [P2, ParDemorado], 16},
+    P2 ! {peers, [P1, ParDemorado], 16},
     Clientes = [spawn(fun() ->
         Resultado = simple_kv:get(Pid, {ausente, N}),
         Padre ! {Marca, lectura, N, Resultado}
@@ -185,7 +183,7 @@ consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
             end
         after exit(Escritor, kill)
         end,
-        Gate ! {Marca, liberar},
+        ParDemorado ! {Marca, liberar},
         lists:foreach(fun(N) ->
             receive {Marca, lectura, N, R} -> ?assertEqual(not_found, R)
             after 1000 -> erlang:error(consulta_no_termino)
@@ -193,16 +191,16 @@ consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
         end, [1, 2])
     after
         %% Liberar primero permite limpiar aun si falla una asercion.
-        Gate ! {Marca, liberar},
+        ParDemorado ! {Marca, liberar},
         lists:foreach(fun(C) -> exit(C, kill) end, Clientes),
         simple_kv:stop([P1, P2]),
-        exit(Gate, kill)
+        exit(ParDemorado, kill)
     end.
 
 %% Auxiliares de pruebas internas del protocolo, no exportados.
-consultar_local(Pid, Key) ->
+consultar_local(Pid, Clave) ->
     Ref = make_ref(),
-    Pid ! {consultar, self(), Ref, Key},
+    Pid ! {consultar, self(), Ref, Clave},
     receive
         {respuesta_consulta, Ref, Pid, Resultado} -> Resultado
     after 1000 -> erlang:error(consulta_local_sin_respuesta)
@@ -210,9 +208,9 @@ consultar_local(Pid, Key) ->
 
 par_controlado(Padre, Marca, Valores) ->
     receive
-        {consultar, Solicitante, Ref, Key} ->
-            Padre ! {Marca, consultado, Key},
-            Solicitante ! {respuesta_consulta, Ref, self(), maps:find(Key, Valores)},
+        {consultar, Solicitante, Ref, Clave} ->
+            Padre ! {Marca, consultado, Clave},
+            Solicitante ! {respuesta_consulta, Ref, self(), maps:find(Clave, Valores)},
             par_controlado(Padre, Marca, Valores)
     end.
 
@@ -231,7 +229,7 @@ esperar_convergencia(Pids, Plazo) ->
 
 retener_consultas(Padre, Marca, Acumuladas) ->
     receive
-        {consultar, Solicitante, Ref, _Key} ->
+        {consultar, Solicitante, Ref, _Clave} ->
             Nuevas = [{Solicitante, Ref} | Acumuladas],
             case length(Nuevas) of
                 2 ->

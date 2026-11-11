@@ -4,12 +4,12 @@
 
 obtener_plazo_ms(Ms)->erlang:monotonic_time(millisecond) + Ms.
 
-esperar_valor(Pid, Key, Esperado, Ms) ->
+esperar_valor(Pid, Clave, Esperado, Ms) ->
     Plazo = obtener_plazo_ms(Ms),
-    esperar_valor_hasta(Pid, Key, Esperado, Plazo).
+    esperar_valor_hasta(Pid, Clave, Esperado, Plazo).
 
-esperar_valor_hasta(Pid, Key, Esperado, Plazo) ->
-    Actual = simple_kv:get(Pid, Key),
+esperar_valor_hasta(Pid, Clave, Esperado, Plazo) ->
+    Actual = simple_kv:get(Pid, Clave),
     case Actual =:= Esperado of
         true ->
             ok;
@@ -19,6 +19,6 @@ esperar_valor_hasta(Pid, Key, Esperado, Plazo) ->
                     ?assertEqual(Esperado, Actual);
                 false ->
                     timer:sleep(10),
-                    esperar_valor_hasta(Pid, Key, Esperado, Plazo)
+                    esperar_valor_hasta(Pid, Clave, Esperado, Plazo)
             end
     end.

@@ -30,10 +30,10 @@ lecturas_y_escrituras_simultaneas_por_api_test() ->
 
 %% Libera los clientes juntos y exige que cada operacion termine sin error.
 concurrir(Funciones) ->
-    Parent = self(),
+    Padre = self(),
     Procesos = [spawn_monitor(fun() ->
         receive arrancar -> ok end,
-        Parent ! {resultado, self(), F()}
+        Padre ! {resultado, self(), F()}
     end) || F <- Funciones],
     lists:foreach(fun({Pid, _}) -> Pid ! arrancar end, Procesos),
     try lists:foreach(fun({Pid, Ref}) ->
@@ -48,13 +48,13 @@ concurrir(Funciones) ->
     after lists:foreach(fun({Pid, Ref}) -> exit(Pid, kill), erlang:demonitor(Ref, [flush]) end, Procesos) end.
 
 %% Espera que las lecturas publicas coincidan despues de terminar los escritores.
-esperar_acuerdo(Ps, Key, Plazo) ->
-    Respuestas = [simple_kv:get(P, Key) || P <- Ps],
+esperar_acuerdo(Ps, Clave, Plazo) ->
+    Respuestas = [simple_kv:get(P, Clave) || P <- Ps],
     case lists:usort(Respuestas) of
         [Unica] -> Unica;
         _ ->
             case erlang:monotonic_time(millisecond) >= Plazo of
                 true -> error({sin_acuerdo, Respuestas});
-                false -> receive after 5 -> ok end, esperar_acuerdo(Ps, Key, Plazo)
+                false -> receive after 5 -> ok end, esperar_acuerdo(Ps, Clave, Plazo)
             end
     end.

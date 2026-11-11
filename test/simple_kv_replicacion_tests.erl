@@ -8,6 +8,6 @@ elige_mayor_sin_importar_orden_test() ->
     ?assertEqual(Nueva, simple_kv_replicacion:elegir_mayor(Nueva, Vieja)).
 
 sin_informacion_conserva_la_otra_test() ->
-    Entry = {ok, {8, borrado}},
-    ?assertEqual(Entry, simple_kv_replicacion:elegir_mayor(error, Entry)),
-    ?assertEqual(Entry, simple_kv_replicacion:elegir_mayor(Entry, error)).
+    Entrada = {ok, {8, borrado}},
+    ?assertEqual(Entrada, simple_kv_replicacion:elegir_mayor(error, Entrada)),
+    ?assertEqual(Entrada, simple_kv_replicacion:elegir_mayor(Entrada, error)).

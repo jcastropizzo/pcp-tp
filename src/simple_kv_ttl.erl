@@ -1,8 +1,8 @@
 -module(simple_kv_ttl).
--export([expira/1, vigente/1]).
+-export([calcular_vencimiento/1, vigente/1]).
 
-expira(infinity) -> infinity;
-expira(Time) -> erlang:monotonic_time(millisecond) + Time.
+calcular_vencimiento(infinity) -> infinity;
+calcular_vencimiento(TTL) -> erlang:monotonic_time(millisecond) + TTL.
 
 vigente(infinity) -> true;
-vigente(Expira) -> erlang:monotonic_time(millisecond) < Expira.
+vigente(Vence) -> erlang:monotonic_time(millisecond) < Vence.

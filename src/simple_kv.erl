@@ -8,38 +8,39 @@
 -spec delete(pid(), term()) -> ok.
 -spec get(pid(), term()) -> {ok, term()} | not_found.
 
-put(A, B, C) ->
-    put(A, B, C, infinity).
+put(Pid, Clave, Valor) ->
+    put(Pid, Clave, Valor, infinity).
 
-put(Pid, Key, Val, Time) when
-    is_integer(Time), Time >= 0; Time =:= infinity
+put(Pid, Clave, Valor, TTL) when
+    is_integer(TTL), TTL >= 0; TTL =:= infinity
 ->
-    Ref = make_ref(),
-    Pid ! {put, self(), Ref, Key, Val, Time},
+    RefCliente = make_ref(),
+    Pid ! {put, self(), RefCliente, Clave, Valor, TTL},
     receive
-        {Ref, ok} -> ok
+        {RefCliente, ok} -> ok
     end.
 
-get(Pid, Key) ->
-    Ref = make_ref(),
-    Pid ! {get, self(), Ref, Key},
+get(Pid, Clave) ->
+    RefCliente = make_ref(),
+    Pid ! {get, self(), RefCliente, Clave},
     receive
-        {Ref, ok, Val} -> {ok, Val};
-        {Ref, not_found} -> not_found
+        {RefCliente, ok, Valor} -> {ok, Valor};
+        {RefCliente, not_found} -> not_found
     end.
 
-delete(Pid, Key) ->
-    Ref = make_ref(),
-    Pid ! {delete, self(), Ref, Key},
+delete(Pid, Clave) ->
+    RefCliente = make_ref(),
+    Pid ! {delete, self(), RefCliente, Clave},
     receive
-        {Ref, ok} -> ok
+        {RefCliente, ok} -> ok
     end.
 
-%% Alfa: capacidad maxima de valores por replica (4.7).
-start_link(N, Alfa) when is_integer(N), N >= 1, is_integer(Alfa), Alfa >= 3 ->
+start_link(Cantidad, Alfa) when
+    is_integer(Cantidad), Cantidad >= 1, is_integer(Alfa), Alfa >= 3
+->
     Pids = lists:map(
         fun(_) -> spawn_link(fun() -> simple_kv_replica:init() end) end,
-        lists:seq(1, N)
+        lists:seq(1, Cantidad)
     ),
     lists:foreach(
         fun(Pid) -> Pid ! {peers, lists:delete(Pid, Pids), Alfa} end,

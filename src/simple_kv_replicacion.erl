@@ -4,14 +4,13 @@
 nueva_version() ->
     erlang:unique_integer([monotonic]).
 
-%% Propaga un cambio (put o delete) a todas las demas replicas. No espera respuesta.
-replicar(Peers, Key, Entry) ->
-    lists:foreach(fun(Pid) -> Pid ! {replica, Key, Entry} end, Peers).
+%% La propagación es asincrónica: el origen no espera confirmaciones.
+replicar(Pares, Clave, Entrada) ->
+    lists:foreach(fun(Pid) -> Pid ! {replica, Clave, Entrada} end, Pares).
 
-%% Antes de desalojar un valor vigente, se lo ofrece a las demas replicas (4.7).
-%% No espera respuesta: quien lo recibe decide si lo guarda.
-ofrecer(Peers, Key, Entry) ->
-    lists:foreach(fun(Pid) -> Pid ! {ofrecer, Key, Entry} end, Peers).
+%% Cada par decide si conserva el valor que se está desalojando (§4.7).
+ofrecer(Pares, Clave, Entrada) ->
+    lists:foreach(fun(Pid) -> Pid ! {ofrecer, Clave, Entrada} end, Pares).
 
 elegir_mayor(error, Otra) ->
     Otra;
