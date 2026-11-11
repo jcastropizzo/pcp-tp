@@ -1,69 +1,117 @@
-# TP Key-Value replicado – Documento de diseño
+# Base de datos key-value replicada
 
-## 1. Estructura de las réplicas
+PCP · Segundo cuatrimestre 2026 · Diseño según consigna V5
 
-Cada réplica es un proceso de Erlang que corre un `loop` y va pasando su estado de una vuelta a la siguiente. En ese estado guarda varias cosas.
+## 1. Estructura e interfaz
 
-Primero, la lista de pids de las otras réplicas (`Peers`). La necesita porque cada vez que hay un cambio se lo tiene que avisar a las demás, y también para ofrecerles valores cuando desaloja o para preguntarles cuando le piden algo que no tiene.
+La implementación corre en una única VM BEAM. Los procesos no fallan y `stop/1` se invoca una vez al final con todos los identificadores. La API pública es `start_link/2`, `stop/1`, `put/3`, `put/4`, `delete/2` y `get/2`. Claves y valores pueden ser cualquier término Erlang.
 
-También guarda `Alfa`, que es la cantidad máxima de valores que puede tener al mismo tiempo.
+`start_link(Count, Alfa)` valida Count entero positivo y Alfa entero ≥3, crea Count réplicas enlazadas al invocante y un coordinador también enlazado. Antes de retornar espera que las réplicas reciban su configuración. Cada una conoce sus pares y el coordinador. `stop/1` monitorea y detiene cada réplica; el coordinador las monitorea y termina cuando terminó la última.
 
-Los datos van en un mapa (`Map`). Para cada clave se guarda `{Version, Valor, Vence}`. La versión sirve para decidir qué cambio gana cuando dos llegan desordenados. El vencimiento se guarda como un instante absoluto, no como un TTL relativo, así cualquier réplica puede saber si el valor sigue vigente sin importar cuándo le llegó. Este mapa es lo único que cuenta para la capacidad α.
+### Estado de una réplica
 
-Aparte hay metadatos de claves que no tienen valor. Ahí están las lápidas de los borrados (la clave marcada como `borrado` con su versión) y las marcas de claves que fueron desalojadas. Las lápidas hacen falta para que un put viejo que llega tarde no vuelva a crear algo que ya se borró. Estos metadatos no ocupan lugar de α.
+- `Peers` y `Alfa`: otras réplicas y cota de almacenamiento.
+- `Map`: `Key => {Version, {value, Valor, Vence}}`; como máximo Alfa entradas.
+- `Metadatos`: `Key => {Version, valor | borrado | desalojado}`. Conserva información de una clave aunque ya no conserve su valor.
+- `Pendientes`: `ConsultaRef => {Cliente, Ref, Key, Faltan}`. No acumula valores de las respuestas.
+- `Coordinador`: identificador del proceso que ordena los cambios.
 
-Por último, la réplica tiene una lista de `Pendientes`: los get que mandó a preguntar a otras réplicas y que todavía están esperando respuestas.
+### Estado del coordinador
 
-## 2. Protocolo de comunicación
+`Pids`, `Alfa`, monitores, `Indice` y `Meta`. El índice guarda `Key => {Version, Vence}` para las entradas residentes; Meta registra versión y estado conocido. El coordinador **no conserva valores de usuario en su estado**. Los valores viajan en mensajes y en los mapas de las réplicas. Para aplicar la política de capacidad construye temporalmente una representación con un marcador fijo sin contenido del usuario.
 
-Al arrancar, `start_link` crea todas las réplicas y le manda a cada una un mensaje `peers` con la lista de las demás y el valor de α. Cuando lo recibe, la réplica guarda esos datos y empieza a atender pedidos.
+Los metadatos pueden crecer con las claves conocidas; no se recolectan lápidas porque un mensaje antiguo podría resucitar un borrado. No se usan behaviours OTP, ETS, DETS, Mnesia, `persistent_term` ni diccionario del proceso. El estado persistente vive en los argumentos de los ciclos de recepción.
 
-El cliente se comunica con una réplica mediante `put`, `get`, `delete` y `stop`. Todos llevan una `Ref` para que el cliente sepa que la respuesta que recibe es la suya.
+---
 
-Cuando una réplica recibe un `put` con clave, valor y TTL, genera una versión nueva, guarda el valor, le responde ok al cliente y le manda un `replica` a las demás. Si con eso se pasó de α, desaloja.
+## 2. Protocolo de mensajes
 
-El `delete` es parecido: genera una versión nueva, saca el valor, deja una lápida, responde ok y también avisa con un `replica`.
+Abreviaturas: I = invocante, C = cliente, R = réplica, P = par, O = coordinador; E = entrada versionada. Cada cliente usa una referencia propia; las consultas remotas usan otra referencia.
 
-El mensaje `replica` va de una réplica a todas las otras con la clave, la versión y el valor con su vencimiento, o la lápida si fue un borrado. La que lo recibe solo lo aplica si esa versión es mayor que la que ya tiene. Después revisa si se pasó de capacidad. No responde nada.
+| Mensaje | Emisor → receptor | Contenido y efecto |
+| --- | --- | --- |
+| `peers` | I → R | Pares, Alfa, coordinador y referencia de inicio. |
+| `{Ref, Pid}` | R → I | Confirma recepción de configuración antes de retornar start. |
+| `put`, `delete` | C → R | Pedido con cliente, referencia y datos. |
+| `escritura` | R → O | Reenvía pedido y origen; O asigna versión y decide. |
+| `ordenada` | O → todas R | Entrada y acción única: guardar, borrar, rechazar o ignorar. |
+| `{Ref, ok}` | R origen → C | Confirma al aplicar localmente, sin esperar a los pares. |
+| `ofrecer` | R → cada P | Ofrece valor vigente antes de descartarlo. |
+| `propuesta_oferta` | P → O | Solicita procesar oferta en el orden común. |
+| `propuesta_replica` | R → O | Ordena una entrada interna recibida para pruebas del protocolo. |
+| `get` | C → R | Pedido de lectura por clave. |
+| `barrera_get` / `get_ordenado` | R ↔ O | Ordena el inicio de lectura respecto de pedidos previos. |
+| `consultar` | R → P | Pide información local de una clave. |
+| `barrera_consulta` / `consulta_ordenada` | P ↔ O | Ordena la respuesta local respecto de eventos anteriores. |
+| `respuesta_consulta` | P → R | Devuelve información local de la clave. |
+| `candidato`, `fin` | R → C | El cliente reduce candidatos y termina con comprobación de TTL. |
+| `stop` | I → R | Detiene la réplica. |
+| `DOWN` | VM → I / O | Informa terminación a stop y al coordinador. |
 
-El mensaje `ofrecer` lo manda una réplica que está desalojando un valor, con la clave, la versión y el valor. La que lo recibe lo guarda solo si tiene lugar y si es más nuevo que lo que tiene. Si no, lo ignora. En ningún caso responde ni desaloja nada.
+Los mensajes inesperados se descartan. Los tipos `peers` de tres y cuatro campos también se aceptan en pruebas internas con pares controlados; el inicio público usa configuración con confirmación. El coordinador no espera que las réplicas confirmen los eventos distribuidos.
 
-Cuando una réplica recibe un `get` y no tiene el valor porque lo desalojó, manda `consulta` a las demás con su pid, la `Ref` y la clave. Cada una contesta en el momento con un `respuesta` que trae lo que tiene de esa clave (versión y valor, lápida o nada). La que preguntó va anotando las respuestas y, cuando tiene todas, le contesta al cliente.
+---
 
-Con `stop`, la réplica responde ok y termina.
+## 3. Orden, conflictos y convergencia
 
-## 3. Resolución de conflictos y borrados
+Todo put o delete público se deriva al coordinador, que asigna una versión con `erlang:unique_integer([monotonic])`. También recibe las ofertas que los pares proponen. Procesa cada mensaje de a uno, calcula una única transición sobre su índice/metadatos y envía a todas las réplicas el mismo evento con esa decisión.
 
-Elegimos last-writer-wins con lápidas. Cada put o delete recibe una versión que genera la réplica que lo atiende con `erlang:unique_integer([monotonic])`. Ese número nunca se repite y siempre crece, así que nunca hay dos versiones iguales.
+Una réplica no vuelve a elegir la víctima ni a evaluar qué entradas estaban vencidas al decidir. Aplica la acción ordenada y, si recibió el pedido del cliente, responde después de su aplicación local. La operación no espera que el resto aplique el evento: la replicación sigue siendo asincrónica.
 
-Cuando a una réplica le llega un cambio sobre una clave, compara versiones y se queda con la mayor. El borrado funciona exactamente igual que un put, solo que en lugar de un valor guarda una lápida con su versión.
+### Consistencia observable y orden común
 
-Esto funciona por varias razones. Como siempre se queda la versión más alta, no importa en qué orden lleguen los mensajes ni si llega alguno repetido: el resultado es el mismo. Entonces, una vez que todas las réplicas recibieron todos los cambios, todas tienen lo mismo. Si hay dos put concurrentes sobre la misma clave en réplicas distintas, todas eligen el de versión más alta, o sea que todas eligen el mismo. Y si un put viejo llega después de un delete, pierde porque su versión es menor que la de la lápida, así que el dato borrado no reaparece. En cambio, si el usuario hace un put nuevo después del borrado, ese tiene versión mayor y gana.
+La consistencia eventual se evalúa desde afuera: cuando cesan las escrituras y se propagan los cambios, los nodos deben responder de forma consistente y correcta. La consigna no exige por sí misma que sus estados internos sean idénticos. Este diseño utiliza mapas iguales como estrategia para lograr esa propiedad; otros diseños podrían resolver las lecturas con estados físicos diferentes. El TTL sigue aplicándose en el instante de cada lectura.
 
-## 4. Detección de vencimiento
+Todos los eventos mutables de la API pública y de ofertas salen del mismo coordinador hacia cada réplica. Erlang preserva el orden por pareja emisor/receptor. Las réplicas parten del mismo estado y aplican las mismas acciones con las mismas entradas; por inducción sus mapas coinciden luego de aplicar el mismo prefijo de eventos. Si cesan las escrituras, llegan los mensajes y las ofertas terminan, alcanzan el mismo mapa. Los resultados transitorios pueden diferir mientras unas réplicas avanzan más que otras.
 
-Cuando se hace un put se calcula `Vence = ahora + TTL`, o `infinity` si no tiene TTL, y ese valor viaja así en la replicación. No usamos timers: el vencimiento se revisa en el momento en que se usa el valor.
+Para `put(d)` que desaloja `a`, seguido de `delete(d)` desde otra réplica, todas reciben y aplican primero la decisión de desalojo y luego la lápida. Una oferta que llegue después puede recuperar una copia si el coordinador la acepta, pero la recuperación también es un evento común. No se exige que distintos intercalados de ejecuciones separadas elijan siempre el mismo resultado final.
 
-En un get, si `ahora >= Vence`, el valor se toma como si no existiera y se responde `not_found`. Lo mismo pasa cuando otra réplica responde una consulta: un valor vencido no se devuelve. Al desalojar, antes de sacar un valor válido se limpian los vencidos, que quedan marcados como borrados con su misma versión para que un mensaje viejo no los vuelva a crear.
+### Versiones y borrados
 
-Como todas las réplicas comparan contra el mismo instante absoluto, todas coinciden en cuándo vence un valor, aunque lo hayan recibido en momentos distintos.
+Las versiones se comparan con los metadatos conocidos. Una versión mayor gana; una menor se ignora. Las operaciones originadas por el coordinador tienen versiones únicas. Las copias y ofertas conservan la versión de origen.
 
-## 5. Desalojo
+Un delete crea `{Version, borrado}` y quita el valor. La lápida impide que un put anterior lo restaure; una nueva escritura sí puede reemplazarla. Desalojar deja `{Version, desalojado}`: es ausencia local, no delete. Si llega una copia de la misma versión, el almacén puede recuperarla; el selector de respuestas prefiere ese valor a la marca de desalojo de igual versión.
 
-Cada réplica puede tener como máximo α valores. Después de guardar un valor, ya sea por un put o por un `replica`, revisa si se pasó.
+El orden común fundamenta la igualdad de estado bajo los supuestos y el protocolo público descritos; los tests finitos no demuestran todos los intercalados. El selector protege residentes más entrante: no reconstruye valores ya desalojados tras un borrado.
 
-Si se pasó, primero saca los valores vencidos. Si con eso vuelve a estar dentro del límite, termina ahí y no se pierde nada válido. Si no alcanza, elige el valor de menor versión, que es el que se escribió hace más tiempo, se lo ofrece a las demás réplicas con `ofrecer`, lo saca de su mapa y deja una marca de que fue desalojado. Así, si después le piden esa clave, sabe que tiene que ir a buscarla a otra réplica.
+---
 
-Esto no genera mensajes infinitos. Una réplica solo acepta una oferta si tiene menos de α valores, así que después de aceptarla sigue dentro del límite y nunca necesita desalojar por eso. Además, no responde nada a la oferta. Entonces una oferta nunca dispara otro mensaje, y cada desalojo termina después de mandar un mensaje a cada réplica.
+## 4. TTL, capacidad y ofertas
 
-Tampoco se desaloja de más. Cada réplica atiende un mensaje por vez y solo desaloja hasta volver a α. Como los valores se agregan de a uno, en cada caso sale como mucho uno.
+La V5 (§4.7) establece: «el 75 % escrito más recientemente (en el nodo local) siempre siga disponible». §4.6 establece: «nunca se devuelve un valor vencido». §4.7 también dice: «No es válido tener entradas adicionales en alguna estructura secundaria, α es el tope de valores permitidos para un nodo.»
 
-## 6. Algoritmo para get
+El TTL se calcula al ordenar el put como vencimiento absoluto con el reloj monotónico de la VM. `infinity` no vence; `0` nace vencido. TTL inválido falla en el invocante antes del envío. Replicar u ofrecer conserva el instante. El cliente verifica vigencia al terminar get; ningún valor vencido se devuelve.
 
-Si la réplica tiene la clave vigente en su mapa, responde directamente. Si tiene una lápida, responde `not_found`. El caso interesante es cuando la clave fue desalojada o no la conoce: ahí tiene que preguntarles a las demás.
+Decisión de diseño: conservar físicamente las entradas protegidas aunque venzan. Se toma Q=ceil(3·Alfa/4), redondeado hacia arriba. Estos detalles no son citas literales de la consigna. La recencia considerada por el selector es la de residentes más entrante; no hay cupos independientes según el origen de la escritura. Vencer no crea una lápida; un delete explícito sí puede quitar una entrada protegida.
 
-En ese caso manda `consulta` a todas las otras réplicas y anota el pedido en `Pendientes`, con el cliente, la `Ref` y cuántas respuestas le faltan. Después vuelve a su `loop` normal, sin quedarse bloqueada, y sigue atendiendo puts, gets, replicaciones, ofertas y consultas de otras réplicas mientras espera.
+### Selección y capacidad
 
-Cada respuesta que llega se suma al pedido pendiente. Cuando ya tiene todas, junta lo que le contestaron con lo que tiene ella, se queda con la versión más alta y, si es un valor vigente, se lo devuelve al cliente. Si no encontró nada, o lo que ganó es una lápida o un valor vencido, responde `not_found`.
+Para una clave existente se aplica la versión aceptable sin ocupar otra plaza. Con espacio se incorpora incluso un valor vencido. Con el mapa lleno, se consideran residentes y entrante: las Q versiones mayores quedan protegidas. Entre las restantes se elige un vencido, prefiriendo la menor versión si hay varios; si no hay vencidos, se elige la menor versión. El entrante puede descartarse.
 
-Esto no produce deadlock porque ninguna réplica se queda trabada en un `receive` esperando a otra. Las consultas se responden en el momento con lo que cada réplica tiene, sin preguntarle a nadie más. Entonces, aunque dos réplicas se consulten entre sí al mismo tiempo, cada una contesta la consulta de la otra desde su `loop` normal y las dos terminan. El único que se queda esperando es el cliente, y siempre recibe su respuesta porque todas las réplicas consultadas contestan.
+La elección se calcula una sola vez en el coordinador, con el reloj en ese instante. Su evento identifica la víctima; las réplicas la retiran antes de insertar y nunca almacenan Alfa+1 valores en Map. Una oferta puede entrar con vacante, reemplazo o un vencido no protegido, sin desalojar vigentes.
+
+### Ofertas y terminación
+
+Cada réplica ofrece un valor vigente a sus pares antes de descartarlo. Una réplica receptora envía la propuesta al coordinador, que determina su admisión y distribuye el resultado en el flujo común. La aplicación de una oferta no produce nuevas ofertas; una oferta no desaloja un valor vigente. Por cada escritura hay una cantidad finita de réplicas y mensajes de oferta; ninguna oferta dispara otra cadena.
+
+Los índices y metadatos del coordinador no incluyen valores de usuario; los mensajes en tránsito sí los transportan. Las ofertas dan oportunidad de conservación, no la garantizan: si todas las réplicas descartan una entrada elegible, puede perderse. Liberar espacio más tarde no recupera una copia perdida.
+
+---
+
+## 5. Lecturas, progreso y validación
+
+Un `get` pasa primero por una barrera no bloqueante en el coordinador: la réplica reenvía el pedido y sigue en su ciclo. Al recibir `get_ordenado`, si tiene un valor o lápida, envía un candidato y fin al cliente. Si la clave es desconocida o desalojada y hay pares, registra la consulta y pregunta a todos.
+
+Cada par deriva la consulta por una barrera al coordinador y luego responde con su información local, sin consultar a terceros. Estas barreras ordenan las respuestas respecto de eventos anteriores; el coordinador no espera respuestas de réplicas. La réplica solicitante acepta una respuesta por cada par esperado, reenvía candidatos al cliente y conserva solo referencias y pares faltantes. Al llegar la última, envía también su estado local actualizado y `fin`.
+
+El cliente elige la mayor versión entre candidatos y comprueba el TTL justo antes de retornar `{ok, Valor}` o `not_found`. Una copia de la misma versión prevalece sobre una marca desalojado. Los valores de respuestas no se retienen en Pendientes. Los mensajes de candidatos y fin se envían desde una única réplica en ese orden.
+
+### Progreso y restricciones
+
+Ni las réplicas ni el coordinador esperan sin atender mensajes a otra réplica: la espera ocurre en el cliente. No hay una dependencia circular entre los procesos para contestar consultas. Bajo los supuestos de procesos sin fallas y entrega eventual, terminan las consultas; no se promete latencia acotada ni tolerancia a la caída del coordinador.
+
+### Pruebas y límites
+
+`rebar3 compile` y `rebar3 eunit` usan advertencias como errores. La suite cubre API, TTL, versiones, borrados, capacidad, ofertas y consultas. Por API pública se prueban puts y delete concurrentes sobre una clave, lecturas simultáneas con escritura y convergencia posterior. Pruebas internas complementarias controlan mensajes atrasados, ofertas y réplicas pausadas.
+
+Una cantidad finita de pruebas no puede recorrer todos los intercalados, cargas, tiempos de TTL ni términos Erlang. La justificación para escrituras y ofertas es el orden único del coordinador y la aplicación de sus decisiones en cada réplica; para lecturas, referencias independientes y respuestas locales sin espera circular. El argumento supone procesos sin fallas, entrega eventual y procesamiento de mensajes. No demuestra formalmente cada implementación ni garantiza latencia acotada. La interpretación de la cota para datos en tránsito queda sujeta a la consigna.

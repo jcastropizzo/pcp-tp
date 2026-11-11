@@ -23,10 +23,24 @@ put(Pid, Key, Val, Time) when
 get(Pid, Key) ->
     Ref = make_ref(),
     Pid ! {get, self(), Ref, Key},
+    esperar_get(Ref, error).
+
+%% Los resultados remotos se reducen en el cliente: una replica no conserva
+%% valores adicionales en Pendientes, fuera de su capacidad Alfa.
+esperar_get(Ref, Mejor) ->
     receive
-        {Ref, ok, Val} -> {ok, Val};
-        {Ref, not_found} -> not_found
+        {Ref, candidato, Resultado} ->
+            esperar_get(Ref, simple_kv_replicacion:elegir_mayor(Mejor, Resultado));
+        {Ref, fin} -> resultado_get(Mejor)
     end.
+
+%% El candidato puede vencer mientras llegan respuestas: comprobar al retornar.
+resultado_get({ok, {_, {value, Val, Vence}}}) ->
+    case simple_kv_ttl:vigente(Vence) of
+        true -> {ok, Val};
+        false -> not_found
+    end;
+resultado_get(_) -> not_found.
 
 delete(Pid, Key) ->
     Ref = make_ref(),
@@ -41,10 +55,14 @@ start_link(N, Alfa) when is_integer(N), N >= 1, is_integer(Alfa), Alfa >= 3 ->
         fun(_) -> spawn_link(fun() -> simple_kv_replica:init() end) end,
         lists:seq(1, N)
     ),
+    Coordinador = spawn_link(fun() -> simple_kv_coordinador:init(Pids, Alfa) end),
+    Inicializacion = make_ref(),
     lists:foreach(
-        fun(Pid) -> Pid ! {peers, lists:delete(Pid, Pids), Alfa} end,
+        fun(Pid) -> Pid ! {peers, lists:delete(Pid, Pids), Alfa, Coordinador,
+                           self(), Inicializacion} end,
         Pids
     ),
+    lists:foreach(fun(Pid) -> receive {Inicializacion, Pid} -> ok end end, Pids),
     {ok, Pids}.
 
 stop(Pids) ->
@@ -54,7 +72,6 @@ stop(Pids) ->
             Pid ! stop,
             receive
                 {'DOWN', Monitor, process, Pid, _Motivo} -> ok
-            after 1000 -> erlang:error(timeout)
             end
         end,
         Pids

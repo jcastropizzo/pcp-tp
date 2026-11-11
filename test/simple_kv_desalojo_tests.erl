@@ -104,20 +104,20 @@ delete_libera_lugar_test() ->
     ?assertEqual(not_found, simple_kv:get(P, 1)),
     ok = simple_kv:stop([P]).
 
-%% Los vencidos salen antes que los vigentes, aunque tengan version mas alta.
-%% 'b' es el de menor version, pero se conserva porque sale 'a', que vencio.
-vencidos_se_desalojan_primero_test() ->
+%% Consigna V5, seccion 4.7: "el 75 % escrito más recientemente
+%% (en el nodo local) siempre siga disponible".
+%% Criterio acordado: TTL no habilita retirar una entrada protegida.
+vencido_reciente_se_conserva_y_sale_el_menor_elegible_test() ->
     [P] = iniciar(1, 4),
     ok = simple_kv:put(P, b, 1),
     ok = simple_kv:put(P, c, 2),
     ok = simple_kv:put(P, d, 3),
-    ok = simple_kv:put(P, a, 0, 50),
-    timer:sleep(100),
+    ok = simple_kv:put(P, a, 0, 0),
     ok = simple_kv:put(P, e, 4),
-    ?assertEqual({ok, 1}, simple_kv:get(P, b)),
-    ?assertEqual({ok, 2}, simple_kv:get(P, c)),
-    ?assertEqual({ok, 3}, simple_kv:get(P, d)),
-    ?assertEqual({ok, 4}, simple_kv:get(P, e)),
+    ?assertEqual(not_found, simple_kv:get(P, b)),
+    lists:foreach(fun({K,V}) -> ?assertEqual({ok,V}, simple_kv:get(P,K)) end,
+                  [{c,2},{d,3},{e,4}]),
+    %% Que a siga fisicamente en Map se comprueba en la suite de proteccion.
     ?assertEqual(not_found, simple_kv:get(P, a)),
     ok = simple_kv:stop([P]).
 

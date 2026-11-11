@@ -1,98 +1,87 @@
-# PCP — TP: base de datos key-value replicada
+# PCP — Almacén key-value replicado
 
-Este README contiene exclusivamente información de PCP y su TP. La planificación general y otras materias se mantienen fuera de este repositorio.
+Implementación Erlang para la [consigna V5](consigna/kv_replicado.pdf), en una VM BEAM. El [informe de diseño](output/pdf/informe_tp.pdf) explica el protocolo, los mensajes y sus supuestos; su fuente editable es [informe_tp.md](informe_tp.md).
 
-## Estado actual — cierre de sesión iniciada el 1/11/2026
+**Entrega:** 11/11/2026 a las 23:59 mediante push al repositorio asignado por la cátedra. Este repositorio es privado de trabajo y no constituye la entrega.
 
-Check-in reportado por alumno/tutor con continuidad posterior. Planificación leyó el log de cierre y comprobó HEAD y estado Git; no reejecutó pruebas ni auditó la implementación completa.
+## Estado y pendientes
 
-Se recuperó la base local y se incorporaron TTL, versiones, replicación asincrónica y borrados con metadatos, partiendo del aporte del compañero y con guía del tutor. Se implementaron consultas remotas sin espera bloqueante dentro del ciclo, representación explícita de valores desalojados y recuperación de igual versión. Capacidad iniciada: selector, desalojo local y manejo de valores replicados con límite de almacenamiento. Esto no acredita cumplimiento completo ni corrección concurrente general.
+- [x] API, replicación, TTL, borrados, capacidad, ofertas y lecturas implementados.
+- [x] Informe de diseño de cinco páginas y tests propios incluidos.
+- [x] Compilación estricta y 102 tests aprobados; incluye operaciones concurrentes por API y pruebas internas con intercalados controlados.
+- [ ] Confirmar que ambos integrantes tienen acceso al repositorio asignado y que sus cuentas fueron informadas a docentes.
+- [ ] Llevar código, tests, configuración e informe al repositorio de la cátedra; compilar y ejecutar allí los tests.
+- [ ] Hacer push antes del vencimiento y verificar los archivos en el remoto de la cátedra.
 
-Se configuró rebar3 y se separaron módulos/tests. Comando habitual: `rebar3 eunit`.
+Los tests verifican escenarios concretos, no todos los intercalados posibles. El informe justifica el orden de eventos y el progreso bajo los supuestos del TP; no es una demostración formal. La interpretación de la cota de capacidad respecto de valores transitorios en mensajes queda sujeta a la consigna.
 
-## Evidencia y versión
+## Checklist de requisitos V5
 
-- Repo local: `/Users/howdytest/playground/pcp-tp`.
-- HEAD comprobado: `c8bc08c50171b163dcc6c45ffa8e48593e7681ae`.
-- Cambios preparados respecto de HEAD: `src/simple_kv_almacen.erl`, `src/simple_kv_replica.erl`, `test/simple_kv_almacen_tests.erl`.
-- Log local: `/Users/howdytest/Documents/ChatGPT/planificacion/pcp-cierre-sesion-01.log`: comandos, salida completa, Git y huellas de archivos. Su marca UTC corresponde al 2/11 a las 23:50 de Buenos Aires; no mide duración de estudio.
-- Log leído por planificación: compilación `erlc +warn_all -Werror -o /private/tmp/pcp-cierre-Cnlbjf src/*.erl test/*.erl`, código 0; EUnit de seis módulos, **38/38 aprobados**, código 0. Esta ejecución usó `erl -noshell`; no confundirla con una nueva ejecución observada de `rebar3 eunit`.
-- Igualdad de la implementación local con GitHub no verificada. Este cambio de README no publica el código local.
+### Interfaz y replicación (§3–4.5)
 
-La evidencia previa de 11 tests queda superada por esta suite de cierre. No dar por resuelto el timeout propio de stop ni su camino de error sin comprobar su estado actual.
+- [x] `start_link/2`, `stop/1`, `put/3`, `put/4`, `delete/2` y `get/2`; claves y valores pueden ser términos Erlang.
+- [x] Réplicas enlazadas al invocante; `stop/1` espera su terminación.
+- [x] Escrituras y borrados propagados asincrónicamente, sin esperar aplicación en los pares.
+- [x] Versiones crecientes para resolver conflictos; lápidas para evitar que una escritura antigua restaure un borrado.
+- [x] La ausencia por desalojo se distingue de un borrado; una copia de igual versión puede recuperarse.
+- [x] El coordinador ordena escrituras y ofertas y distribuye una decisión común de capacidad. No conserva valores de usuario en su estado.
 
-## Decisiones y participación
+La consistencia eventual se observa en las respuestas una vez propagados los cambios. La igualdad de mapas es una estrategia de esta implementación, no una exigencia general de la propiedad. Las operaciones pueden ver estados transitorios diferentes mientras se propagan los mensajes.
 
-Separar valores y metadatos; estados `valor`, `borrado` y `desalojado`; conservar versión al desalojar; recuperar un valor desalojado de igual versión; capacidad máxima declarada como constante.
+### TTL (§4.6)
 
-Julián propuso separar metadatos, razonó sobre TTL y referencias de expiración, escribió tests y realizó cambios incrementales. Hubo ayuda sustancial con código, patrones Erlang, alcance de variables y diseño. El tutor implementó configuración, refactorización, tests, comentarios, `es_mensaje_nuevo/3` y rama de valores replicados. No atribuir esos cambios a producción autónoma; no hay validación autónoma global del diseño.
+- [x] `infinity` no vence y `0` vence inmediatamente; un TTL inválido produce `function_clause` en el invocante.
+- [x] Las copias mantienen el vencimiento original. `get` vuelve a comprobarlo antes de responder y nunca devuelve un valor vencido.
+- [x] Vencer no genera una lápida ni implica borrar físicamente la entrada.
 
-## Próximo paso con tutor
+### Capacidad y desalojo (§4.7)
 
-**Probar el selector con dos valores infinity y versiones en orden contrario al de las claves.** Cierre: test reproducible, corrección únicamente de ese caso si falla y regresión guardada. Después elegir el siguiente incremento; sin ampliar capacidad antes de cerrar ese caso.
+- [x] Cada réplica almacena como máximo α valores; α debe ser entero mayor o igual a 3.
+- [x] Una sobrescritura de una clave existente no ocupa otra plaza.
+- [x] Con capacidad llena, el selector considera las entradas residentes y la entrante. Protege `Q = ceil(3α/4)` versiones mayores; entre las demás prioriza una vencida y, si no hay, la versión menor. La entrante puede ser descartada.
+- [x] Una entrada protegida permanece físicamente aunque haya vencido; `get` no la devuelve. El redondeo y la conservación física son decisiones de diseño.
+- [x] Antes de descartar un valor vigente, cada réplica lo ofrece a sus pares. La oferta se ordena mediante el coordinador y puede usar una vacante o reemplazar un vencido no protegido; no desaloja vigentes ni genera nuevas ofertas.
 
-## Próxima sesión confirmada — martes 3/11, 22:00–00:00
+La consigna exige que «el 75 % escrito más recientemente (en el nodo local) siempre siga disponible». El selector implementa la protección sobre residentes más entrante; no reconstruye valores ya desalojados a partir de sus metadatos. Una oferta da oportunidad de conservar una copia, pero no lo garantiza: si todas las réplicas descartan una entrada elegible, puede perderse; liberar espacio después no recupera una copia perdida.
 
-America/Buenos_Aires. Dos horas incluyendo pausa, confirmadas por alumno incluso tras advertir el evento de calendario superpuesto; no modificar ese otro evento. Energía por confirmar al comenzar.
+### Lecturas y concurrencia (§4.8–5)
 
-| Horario | Objetivo | Criterio de cierre |
-| --- | --- | --- |
-| 22:00–22:10 | Con tutor, comprobar versión y cambios desde el cierre anterior; confirmar energía. | Estado actual identificado; conservar evidencia previa sin repetir validaciones innecesarias. |
-| 22:10–22:50 | Test selector con dos infinity y versiones opuestas al orden de claves; corregir solo ese caso si falla. | Test permanente con resultado observado y cambio mínimo, o bloqueo reproducible. |
-| 22:50–23:00 | Pausa. | Fuera del tiempo efectivo. |
-| 23:00–23:40 | Si el selector quedó resuelto, abordar un test de sobrescritura con capacidad llena; si no, continuar el mismo bloqueo. | Resultado reproducible y regresión guardada; no exigir completar toda capacidad. |
-| 23:40–00:00 | Regresión final y check-in. | Comandos/salidas, versión, ayuda/autonomía, decisiones, pendientes, tiempo real y energía final. |
+- [x] Si una clave es desconocida o fue desalojada localmente, se consulta a los pares y se comparan versiones.
+- [x] Las consultas usan referencias para asociar respuestas, descartar duplicados y seguir atendiendo otros pedidos mientras esperan.
+- [x] Tests de consultas simultáneas, lecturas cruzadas, respuestas atrasadas, réplica pausada y conflictos entre escritores. Los tests por API incluyen `put` y `delete` concurrentes y lecturas con escrituras simultáneas.
+- [x] El informe explica por qué las consultas no generan espera circular bajo los supuestos del TP.
 
-Presupuesto de tareas 110 min + pausa 10 min, no tiempo realizado. Si hay cansancio, recortar segundo incremento y conservar cierre. Sin disponibilidad confirmada después de esta sesión.
+### Restricciones y supuestos (§6–7)
 
+- [x] Estado persistente en argumentos de los ciclos de recepción; sin behaviours OTP, ETS, DETS, Mnesia, `persistent_term` ni diccionario del proceso.
+- [x] Compilación con advertencias tratadas como errores.
+- [x] Una VM, procesos sin fallas y una llamada final a `stop/1` con todas las réplicas. No se promete tolerancia a fallas ni latencia acotada.
 
-## Pendientes prioritarios
+## Arquitectura
 
-- Oportunidad de conservación en otros pares antes de descartar valores vigentes, sin cadenas infinitas.
-- Sobrescritura con capacidad llena.
-- Selector con varios valores infinity.
-- Pruebas permanentes de capacidad receptora y lectura remota tras desalojo.
-- Mensajes fuera de orden, conflictos concurrentes y consultas simultáneas.
-- Integración de TTL, versiones, borrados, recuperación y capacidad; justificar diseño, no solo tests.
-- Documento de diseño ≤5 páginas.
-- Verificar canal de entrega, código publicado y recepción final.
-- Teórica PCP del lunes 26/10 perdida: contenido por identificar; hacer TP no la recupera.
-
-## Tiempo
-
-Sin cronometraje fiable ni estimación final confirmada. Pausa de 10 minutos reportada; otras interrupciones no registradas. Última energía reportada alta; energía final desconocida. Las 5 h iniciales eran disponibilidad, no trabajo realizado. Tiempos de tests no equivalen a estudio. Sin horas compensatorias.
-
-## Consigna y fecha
-
-[Consigna original (PDF)](consigna/kv_replicado.pdf) · [Transcripción](https://github.com/jcastropizzo/pcp-material/blob/main/trabajos-practicos/tp-01-kv-replicado-erlang.transcripcion.md) · [Resumen de requisitos](https://github.com/jcastropizzo/pcp-material/blob/main/trabajos-practicos/tp-01-kv-replicado-erlang.resumen.md).
-
-**Entrega confirmada: miércoles 11/11/2026 a las 23:59**, según el PDF y la confirmación del alumno del 25/10. Se descarta el 2/11 de la planificación anterior. Este plan usa horario de Buenos Aires. Solo queda por verificar la modalidad/canal de entrega.
-
-Entregar implementación `.erl`, tests propios y documento de diseño de **máximo 5 páginas**. La API es fija: módulo `simple_kv`, exports `start_link/1, stop/1, put/3, put/4, delete/2, get/2`.
-
-## Secuencia de implementación restante
-
-Orden propuesto sujeto al diseño; cada etapa requiere tests y notas para el documento, no solo código.
-
-| Etapa | Criterio de finalización |
+| Módulo | Responsabilidad |
 | --- | --- |
-| Base local | API básica, validaciones, correlación de pedidos, estado en receive y cierre comprobables. |
-| Replicación y versiones | Propagación asincrónica y política de conflictos que converja ante órdenes distintos. |
-| Borrados y TTL | Mensajes antiguos no resucitan datos; nunca se devuelve un valor vencido; casos 0/infinity/invalidación cubiertos. |
-| Lectura remota | Consulta de información ausente sin bloquear atención de otras solicitudes; pedidos simultáneos comprobados. |
-| Capacidad y desalojo | Límite 16, disponibilidad de 12 claves recientes y ofrecimiento finito a otras réplicas, con interpretación confirmada. |
-| Integración y entrega | Tests de cada requisito, revisión de interacciones, compilación limpia, documento completo y entrega verificada. |
+| `simple_kv` | API, inicio y cierre, reducción de resultados de lectura en el cliente. |
+| `simple_kv_replica` | Ciclo de mensajes de cada réplica y coordinación de sus operaciones. |
+| `simple_kv_coordinador` | Orden común de escrituras, ofertas y barreras de lectura; decisión de capacidad. |
+| `simple_kv_ordenada` | Aplicación de decisiones del coordinador y ofertas al descartar. |
+| `simple_kv_consultas` | Inicio y seguimiento de consultas a pares y entrega de candidatos. |
+| `simple_kv_almacen` | Valores, metadatos y resolución por versión. |
+| `simple_kv_capacidad` | Selección protegida, desalojo y aceptación de ofertas. |
+| `simple_kv_replicacion` | Versiones, envío a pares y elección de candidatos. |
+| `simple_kv_ttl` | Cálculo y comprobación del vencimiento. |
 
-Diseñar temprano la interacción entre versiones, borrados, TTL, consultas y desalojo; no tratar estas etapas como módulos independientes cuya suma garantiza corrección.
+El coordinador elige una sola víctima por operación y envía la decisión a todas las réplicas. Cada una la aplica en el mismo orden sin recalcularla con su reloj; la réplica de origen responde al cliente al aplicarla localmente. Los valores viajan en mensajes, y los metadatos no conservan su contenido.
 
-## Revisión final pendiente
+## Compilar y probar
 
-Contrastar con la consigna: API exacta; validación de Count/TTL en invocante; enlaces y terminación de procesos; TTL 0/infinity y sobrescrituras; replicación y convergencia; borrados sin resurrección; capacidad 16 y disponibilidad de 12 claves recientes; ofrecimiento finito; lectura remota sin deadlock; correlación y mensajes inesperados; restricciones de herramientas y estado; concurrencia y bordes. No marcar todo como cumplido por tener 38 tests verdes.
+Se necesitan Erlang/OTP y rebar3:
 
-## Decisiones abiertas
+```sh
+rebar3 compile
+rebar3 eunit
+```
 
-Canal de entrega y reparto con compañero; interpretación de las 12 claves recientes ante concurrencia/borrados/vencimiento; retención de metadatos y borrados; interacción entre convergencia y desalojos. Registrar lo resuelto con evidencia al avanzar.
+**Última verificación, 11/11/2026:** compilación aprobada, **102/102 tests EUnit aprobados** y `erlc +warn_all -Werror` aprobado. Las pruebas combinan API pública con tests internos que controlan órdenes de mensajes. No distribuir `.beam` ni `_build/`: son productos generados.
 
-## Cierre de cada sesión
-
-Entregar al planificador un check-in con versión, comandos/salidas, comportamiento, decisiones, bloqueos, ayuda/autonomía, tiempos medidos/estimados y siguiente paso. Confirmar disponibilidad antes de asignar nuevos bloques.
+Para la entrega se necesitan `src/*.erl`, `test/*.erl`, la configuración de rebar3 y `output/pdf/informe_tp.pdf`. Conservar `informe_tp.md` como fuente editable.
