@@ -6,10 +6,10 @@ Programación Concurrente y Paralela · Segundo cuatrimestre de 2026
 
 Cada réplica es un proceso enlazado al invocante de `start_link/2`. Recibe los pids de sus pares y la capacidad α. El estado pasa por los argumentos de su ciclo de recepción.
 
-- `Map` guarda hasta α asociaciones `Clave => {Version, {value, Valor, Vence}}`. Cada clave ocupa a lo sumo una plaza.
+- `Valores` guarda hasta α asociaciones `Clave => {Version, {valor, Valor, Vence}}`. Cada clave ocupa a lo sumo una plaza.
 - `Metadatos` guarda la mayor versión aplicada de cada clave y su estado, `valor`, `borrado` o `desalojado`. Las marcas sobreviven a la salida del valor y permiten rechazar mensajes obsoletos.
 - `Recientes` registra claves y versiones de las últimas escrituras conocidas que definen la protección de capacidad. La cantidad de registros está acotada por el cupo protegido.
-- `Pendientes` registra cada lectura en curso, su cliente, la clave, los pares que todavía deben contestar y el mejor candidato transitorio. La entrada se elimina al responder. Solo `Map` se usa como almacenamiento de la base de datos.
+- `Pendientes` registra cada lectura en curso, su cliente, la clave, los pares que todavía deben contestar y el mejor candidato transitorio. La entrada se elimina al responder. Solo `Valores` se usa como almacenamiento de la base de datos.
 
 ## 2. Versiones, conflictos y borrados
 
@@ -27,17 +27,17 @@ Al contestar un `get`, se evalúa el vencimiento del candidato ganador, incluso 
 
 | Mensaje | Emisor | Receptor | Efecto |
 | --- | --- | --- | --- |
-| `{peers, Pares, Alfa}` | Invocante de `start_link/2` | Réplica nueva | Inicializa los pares, la capacidad y los mapas. |
-| `{put, Cliente, Ref, Clave, Valor, TTL}` | Cliente | Réplica elegida | Genera versión y vencimiento, aplica la escritura con el límite de capacidad y propaga el cambio. |
-| `{delete, Cliente, Ref, Clave}` | Cliente | Réplica elegida | Quita el valor, guarda una marca versionada y propaga el borrado. |
-| `{get, Cliente, Ref, Clave}` | Cliente | Réplica elegida | Responde a partir de la información local o inicia una consulta a los pares. |
-| `{Ref, ok}` | Réplica | Cliente | Completa el `put` o `delete` local. |
-| `{Ref, ok, Valor}` | Réplica | Cliente | Completa un `get` con el valor vigente. |
-| `{Ref, not_found}` | Réplica | Cliente | Completa un `get` sin valor disponible. |
-| `{replica, Clave, Entrada}` | Réplica de origen | Todos sus pares | Aplica un valor o borrado versionado según el orden de versiones. |
+| `{configurar, Pares, Alfa}` | Invocante de `start_link/2` | Réplica nueva | Inicializa los pares, la capacidad y los mapas. |
+| `{put, Cliente, RefCliente, Clave, Valor, TTL}` | Cliente | Réplica elegida | Genera versión y vencimiento, aplica la escritura con el límite de capacidad y propaga el cambio. |
+| `{delete, Cliente, RefCliente, Clave}` | Cliente | Réplica elegida | Quita el valor, guarda una marca versionada y propaga el borrado. |
+| `{get, Cliente, RefCliente, Clave}` | Cliente | Réplica elegida | Responde a partir de la información local o inicia una consulta a los pares. |
+| `{RefCliente, ok}` | Réplica | Cliente | Completa el `put` o `delete` local. |
+| `{RefCliente, ok, Valor}` | Réplica | Cliente | Completa un `get` con el valor vigente. |
+| `{RefCliente, not_found}` | Réplica | Cliente | Completa un `get` sin valor disponible. |
+| `{replicar, Clave, Entrada}` | Réplica de origen | Todos sus pares | Aplica un valor o borrado versionado según el orden de versiones. |
 | `{ofrecer, Clave, Entrada}` | Réplica que desaloja | Todos sus pares | Da al receptor la opción de conservar un valor vigente. |
-| `{consultar, Solicitante, ConsultaRef, Clave}` | Réplica que atiende un `get` | Todos sus pares | Solicita la entrada o marca local. |
-| `{respuesta_consulta, ConsultaRef, Par, Resultado}` | Par consultado | Réplica solicitante | Aporta un candidato y completa el turno de ese par para esa lectura. |
+| `{consultar, Solicitante, RefConsulta, Clave}` | Réplica que atiende un `get` | Todos sus pares | Solicita la entrada o marca local. |
+| `{respuesta_consulta, RefConsulta, Par, Resultado}` | Par consultado | Réplica solicitante | Aporta un candidato y completa el turno de ese par para esa lectura. |
 | `stop` | Invocante de `stop/1` | Réplica monitoreada | Termina su ciclo de recepción. |
 | `{'DOWN', Monitor, process, Pid, Motivo}` | BEAM | Invocante de `stop/1` | Confirma que el pid monitoreado terminó y habilita el cierre del siguiente. |
 

@@ -60,18 +60,18 @@ recepcion_replicada_limita_capacidad_y_no_desaloja_por_duplicados_test() ->
     {ok, [Pid]} = simple_kv:start_link(1, 16),
     try
         lists:foreach(
-            fun(N) -> Pid ! {replica, N, {N, {value, N, infinity}}} end,
+            fun(N) -> Pid ! {replicar, N, {N, {valor, N, infinity}}} end,
             lists:seq(1, 17)
         ),
         Antes = [{N, consultar_local(Pid, N)} || N <- lists:seq(1, 17)],
-        ?assertEqual(16, length([N || {N, {ok, {_, {value, _, _}}}} <- Antes])),
+        ?assertEqual(16, length([N || {N, {ok, {_, {valor, _, _}}}} <- Antes])),
         ?assertEqual(1, length([N || {N, {ok, {_, desalojado}}} <- Antes])),
         lists:foreach(
-            fun(N) -> ?assertEqual({ok, {N, {value, N, infinity}}}, proplists:get_value(N, Antes)) end,
+            fun(N) -> ?assertEqual({ok, {N, {valor, N, infinity}}}, proplists:get_value(N, Antes)) end,
             lists:seq(6, 17)
         ),
-        Pid ! {replica, 17, {17, {value, 17, infinity}}},
-        Pid ! {replica, 17, {0, {value, obsoleto, infinity}}},
+        Pid ! {replicar, 17, {17, {valor, 17, infinity}}},
+        Pid ! {replicar, 17, {0, {valor, obsoleto, infinity}}},
         Despues = [{N, consultar_local(Pid, N)} || N <- lists:seq(1, 17)],
         ?assertEqual(Antes, Despues)
     after
@@ -82,14 +82,14 @@ recepcion_replicada_limita_capacidad_y_no_desaloja_por_duplicados_test() ->
 get_recupera_valor_remoto_tras_desalojo_test() ->
     Padre = self(),
     Marca = make_ref(),
-    Entrada = {1, {value, remoto, infinity}},
+    Entrada = {1, {valor, remoto, infinity}},
     Par = spawn(fun() -> par_controlado(Padre, Marca, #{1 => Entrada}) end),
     Pid = spawn_link(fun simple_kv_replica:init/0),
-    Pid ! {peers, [Par], 16},
+    Pid ! {configurar, [Par], 16},
     try
-        Pid ! {replica, 1, Entrada},
+        Pid ! {replicar, 1, Entrada},
         lists:foreach(
-            fun(N) -> Pid ! {replica, N, {N, {value, N, infinity}}} end,
+            fun(N) -> Pid ! {replicar, N, {N, {valor, N, infinity}}} end,
             lists:seq(2, 17)
         ),
         ?assertEqual({ok, {1, desalojado}}, consultar_local(Pid, 1)),
@@ -106,8 +106,8 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
 mensaje_viejo_no_resucita_borrado_test() ->
     {ok, [Pid]} = simple_kv:start_link(1, 16),
     try
-        Pid ! {replica, color, {20, borrado}},
-        Pid ! {replica, color, {10, {value, rojo, infinity}}},
+        Pid ! {replicar, color, {20, borrado}},
+        Pid ! {replicar, color, {10, {valor, rojo, infinity}}},
         ?assertEqual({ok, {20, borrado}}, consultar_local(Pid, color)),
         ?assertEqual(not_found, simple_kv:get(Pid, color))
     after
@@ -117,13 +117,13 @@ mensaje_viejo_no_resucita_borrado_test() ->
 %% Prueba interna: fuerza los dos ordenes de entrega en replicas reales.
 ordenes_opuestos_convergen_a_misma_version_test() ->
     {ok, [P1, P2] = Pids} = simple_kv:start_link(2, 16),
-    Vieja = {10, {value, rojo, infinity}},
-    Nueva = {20, {value, azul, infinity}},
+    Vieja = {10, {valor, rojo, infinity}},
+    Nueva = {20, {valor, azul, infinity}},
     try
-        P1 ! {replica, color, Vieja},
-        P1 ! {replica, color, Nueva},
-        P2 ! {replica, color, Nueva},
-        P2 ! {replica, color, Vieja},
+        P1 ! {replicar, color, Vieja},
+        P1 ! {replicar, color, Nueva},
+        P2 ! {replicar, color, Nueva},
+        P2 ! {replicar, color, Vieja},
         ?assertEqual({ok, Nueva}, consultar_local(P1, color)),
         ?assertEqual({ok, Nueva}, consultar_local(P2, color))
     after
@@ -163,8 +163,8 @@ consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
     ParDemorado = spawn(fun() -> retener_consultas(Padre, Marca, []) end),
     P1 = spawn_link(fun simple_kv_replica:init/0),
     P2 = spawn_link(fun simple_kv_replica:init/0),
-    P1 ! {peers, [P2, ParDemorado], 16},
-    P2 ! {peers, [P1, ParDemorado], 16},
+    P1 ! {configurar, [P2, ParDemorado], 16},
+    P2 ! {configurar, [P1, ParDemorado], 16},
     Clientes = [spawn(fun() ->
         Resultado = simple_kv:get(Pid, {ausente, N}),
         Padre ! {Marca, lectura, N, Resultado}

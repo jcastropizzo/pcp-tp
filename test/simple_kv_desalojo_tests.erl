@@ -10,7 +10,7 @@ iniciar(N, Alfa) ->
 %% Replica cuyo unico par es el proceso del test.
 replica_con_par_falso(Alfa) ->
     Rep = spawn_link(fun simple_kv_replica:init/0),
-    Rep ! {peers, [self()], Alfa},
+    Rep ! {configurar, [self()], Alfa},
     Rep.
 
 poner_varios(Pid, Claves) ->
@@ -122,7 +122,7 @@ desalojo_ofrece_el_valor_test() ->
     Rep = replica_con_par_falso(3),
     poner_varios(Rep, [1, 2, 3, 4]),
     receive
-        {ofrecer, Clave, {_Version, {value, Valor, _Vence}}} ->
+        {ofrecer, Clave, {_Version, {valor, Valor, _Vence}}} ->
             ?assertEqual(1, Clave),
             ?assertEqual(1, Valor)
     after 1000 ->
@@ -133,7 +133,7 @@ desalojo_ofrece_el_valor_test() ->
 %% Con lugar libre, la oferta se acepta y queda disponible localmente.
 oferta_aceptada_con_lugar_test() ->
     Rep = replica_con_par_falso(3),
-    Entrada = {simple_kv_replicacion:nueva_version(), {value, ofrecido, infinity}},
+    Entrada = {simple_kv_replicacion:nueva_version(), {valor, ofrecido, infinity}},
     Rep ! {ofrecer, k, Entrada},
     ?assertEqual({ok, ofrecido}, simple_kv:get(Rep, k)),
     ok = simple_kv:stop([Rep]).
@@ -142,7 +142,7 @@ oferta_aceptada_con_lugar_test() ->
 oferta_rechazada_sin_lugar_test() ->
     Rep = replica_con_par_falso(3),
     poner_varios(Rep, [1, 2, 3]),
-    Entrada = {simple_kv_replicacion:nueva_version(), {value, ofrecido, infinity}},
+    Entrada = {simple_kv_replicacion:nueva_version(), {valor, ofrecido, infinity}},
     Rep ! {ofrecer, k, Entrada},
     %% como no la guardo, el get de k tiene que consultar al par
     ok = get_async(Rep, k),
@@ -158,7 +158,7 @@ oferta_vieja_no_pisa_valor_nuevo_test() ->
     Rep = replica_con_par_falso(3),
     VersionVieja = simple_kv_replicacion:nueva_version(),
     ok = simple_kv:put(Rep, k, nuevo),
-    Rep ! {ofrecer, k, {VersionVieja, {value, viejo, infinity}}},
+    Rep ! {ofrecer, k, {VersionVieja, {valor, viejo, infinity}}},
     ?assertEqual({ok, nuevo}, simple_kv:get(Rep, k)),
     ok = simple_kv:stop([Rep]).
 
@@ -168,7 +168,7 @@ oferta_vieja_no_revive_borrado_test() ->
     VersionVieja = simple_kv_replicacion:nueva_version(),
     ok = simple_kv:put(Rep, k, v),
     ok = simple_kv:delete(Rep, k),
-    Rep ! {ofrecer, k, {VersionVieja, {value, v, infinity}}},
+    Rep ! {ofrecer, k, {VersionVieja, {valor, v, infinity}}},
     ?assertEqual(not_found, simple_kv:get(Rep, k)),
     ok = simple_kv:stop([Rep]).
 
@@ -212,7 +212,7 @@ respuesta_vencida_no_se_devuelve_test() ->
     ok = get_async(Rep, k),
     {Rep, RefConsulta} = esperar_consulta(k),
     Vencido = {simple_kv_replicacion:nueva_version(),
-               {value, x, erlang:monotonic_time(millisecond) - 1}},
+               {valor, x, erlang:monotonic_time(millisecond) - 1}},
     ok = responder_consulta(Rep, RefConsulta, {ok, Vencido}),
     ?assertEqual(not_found, esperar_get(k)),
     ok = simple_kv:stop([Rep]).
@@ -223,7 +223,7 @@ valor_que_llega_mientras_espera_test() ->
     Rep = replica_con_par_falso(3),
     ok = get_async(Rep, k),
     {Rep, RefConsulta} = esperar_consulta(k),
-    Rep ! {replica, k, {simple_kv_replicacion:nueva_version(), {value, llego, infinity}}},
+    Rep ! {replicar, k, {simple_kv_replicacion:nueva_version(), {valor, llego, infinity}}},
     ok = responder_consulta(Rep, RefConsulta, error),
     ?assertEqual({ok, llego}, esperar_get(k)),
     ok = simple_kv:stop([Rep]).
@@ -240,7 +240,7 @@ replica_no_se_bloquea_mientras_consulta_test() ->
     MiRef = make_ref(),
     Rep ! {consultar, self(), MiRef, otra},
     receive
-        {respuesta_consulta, MiRef, Rep, {ok, {_V, {value, Valor, _Vence}}}} ->
+        {respuesta_consulta, MiRef, Rep, {ok, {_V, {valor, Valor, _Vence}}}} ->
             ?assertEqual(1, Valor)
     after 1000 ->
         erlang:error(no_respondio_consulta)

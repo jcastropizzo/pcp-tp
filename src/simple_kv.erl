@@ -43,7 +43,7 @@ start_link(Cantidad, Alfa) when
         lists:seq(1, Cantidad)
     ),
     lists:foreach(
-        fun(Pid) -> Pid ! {peers, lists:delete(Pid, Pids), Alfa} end,
+        fun(Pid) -> Pid ! {configurar, lists:delete(Pid, Pids), Alfa} end,
         Pids
     ),
     {ok, Pids}.

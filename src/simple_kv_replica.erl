@@ -4,14 +4,14 @@
 %% Estado de la réplica en los argumentos de loop/6.
 %%   Pares      : pids de las otras réplicas
 %%   Alfa       : capacidad máxima de valores (§4.7)
-%%   Valores        : Clave => {Version, {value, Valor, Vence}}      (solo valores)
+%%   Valores        : Clave => {Version, {valor, Valor, Vence}}      (solo valores)
 %%   Metadatos  : Clave => {Version, valor | borrado | desalojado}
 %%   Recientes  : Clave => versión de la escritura protegida (§4.7)
 %%   Pendientes : RefConsulta => {Cliente, RefCliente, Clave, Faltan, Mejor}  (lecturas en curso, §4.8)
 
 init() ->
     receive
-        {peers, Pares, Alfa} -> loop(Pares, Alfa, #{}, #{}, #{}, #{})
+        {configurar, Pares, Alfa} -> loop(Pares, Alfa, #{}, #{}, #{}, #{})
     end.
 
 loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
@@ -28,7 +28,7 @@ loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
 
         {put, Cliente, RefCliente, Clave, Valor, TTL} ->
             Entrada = {simple_kv_replicacion:nueva_version(),
-                     {value, Valor, simple_kv_ttl:calcular_vencimiento(TTL)}},
+                     {valor, Valor, simple_kv_ttl:calcular_vencimiento(TTL)}},
             {NuevosValores, NuevosMetadatos, NuevosRecientes} =
                 simple_kv_capacidad:guardar(Pares, Alfa, Clave, Entrada, Valores, {Metadatos, Recientes}),
             Cliente ! {RefCliente, ok},
@@ -46,7 +46,7 @@ loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
         {get, Cliente, RefCliente, Clave} ->
             Local = simple_kv_almacen:buscar_local(Clave, Valores, Metadatos),
             case Local of
-                {ok, {_Version, {value, _Valor, _Vence}}} ->
+                {ok, {_Version, {valor, _Valor, _Vence}}} ->
                     responder_lectura(Cliente, RefCliente, Local),
                     loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
                 {ok, {_Version, borrado}} ->
@@ -61,11 +61,11 @@ loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
                     loop(Pares, Alfa, Valores, Metadatos, Recientes, NuevosPendientes)
             end;
 
-        {replica, Clave, {_Version, borrado} = Entrada} ->
+        {replicar, Clave, {_Version, borrado} = Entrada} ->
             NuevosValores = simple_kv_almacen:aplicar_actualizacion(Clave, Entrada, Valores, Metadatos),
             NuevosMetadatos = simple_kv_almacen:registrar_metadatos(Clave, Entrada, Metadatos),
             loop(Pares, Alfa, NuevosValores, NuevosMetadatos, Recientes, Pendientes);
-        {replica, Clave, {_Version, {value, _, _}} = Entrada} ->
+        {replicar, Clave, {_Version, {valor, _, _}} = Entrada} ->
             {NuevosValores, NuevosMetadatos, NuevosRecientes} =
                 simple_kv_capacidad:guardar(Pares, Alfa, Clave, Entrada, Valores, {Metadatos, Recientes}),
             loop(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
@@ -126,7 +126,7 @@ responder_lectura(Cliente, RefCliente, {ok, {_Version, borrado}}) ->
     Cliente ! {RefCliente, not_found};
 responder_lectura(Cliente, RefCliente, {ok, {_Version, desalojado}}) ->
     Cliente ! {RefCliente, not_found};
-responder_lectura(Cliente, RefCliente, {ok, {_Version, {value, Valor, Vence}}}) ->
+responder_lectura(Cliente, RefCliente, {ok, {_Version, {valor, Valor, Vence}}}) ->
     case simple_kv_ttl:vigente(Vence) of
         true -> Cliente ! {RefCliente, ok, Valor};
         false -> Cliente ! {RefCliente, not_found}

@@ -1,7 +1,7 @@
 -module(simple_kv_capacidad).
 -export([guardar/6, aceptar_oferta/6, entrada_mas_antigua/1]).
 
--type entrada() :: {integer(), {value, term(), integer() | infinity}}.
+-type entrada() :: {integer(), {valor, term(), integer() | infinity}}.
 -type valores() :: #{term() => entrada()}.
 -type metadatos() :: #{term() => {integer(), valor | borrado | desalojado}}.
 -type recientes() :: #{term() => integer()}.
@@ -37,7 +37,7 @@ guardar(Pares, Alfa, Clave, Entrada, Valores, {Metadatos, Recientes}) ->
 %% sin emitir mensajes, el receptor corta la cadena de ofertas.
 -spec aceptar_oferta(term(), term(), pos_integer(), valores(), metadatos(),
                      recientes()) -> estado().
-aceptar_oferta(Clave, {_, {value, _, Vence}} = Entrada, Alfa, Valores, Metadatos, Recientes) ->
+aceptar_oferta(Clave, {_, {valor, _, Vence}} = Entrada, Alfa, Valores, Metadatos, Recientes) ->
     case simple_kv_ttl:vigente(Vence)
          andalso simple_kv_almacen:version_no_obsoleta(Clave, Entrada, Metadatos) of
         false ->
@@ -90,7 +90,7 @@ elegir_descarte(Candidatos) ->
 
 candidato_vencido(Valores) ->
     Vencidos = maps:filter(
-        fun(_Clave, {_, {value, _, Vence}}) -> not simple_kv_ttl:vigente(Vence) end,
+        fun(_Clave, {_, {valor, _, Vence}}) -> not simple_kv_ttl:vigente(Vence) end,
         Valores),
     entrada_mas_antigua(Vencidos).
 
@@ -109,7 +109,7 @@ entrada_mas_antigua(Valores) when is_map(Valores) ->
         Valores
     ).
 
-desalojar(Pares, Clave, {Version, {value, _, Vence}} = Entrada, Valores, Metadatos) ->
+desalojar(Pares, Clave, {Version, {valor, _, Vence}} = Entrada, Valores, Metadatos) ->
     case simple_kv_ttl:vigente(Vence) of
         true -> simple_kv_replicacion:ofrecer(Pares, Clave, Entrada);
         false -> ok

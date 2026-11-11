@@ -63,8 +63,8 @@ esperar_stop_en_buzon(Pid, Plazo) ->
 %% Un mensaje inesperado recibido antes de inicializar no queda en el buzon.
 init_descarta_mensajes_test() ->
     P = spawn_link(fun simple_kv_replica:init/0),
-    P ! inesperado_antes_de_peers,
-    P ! {peers, [], 3},
+    P ! inesperado_antes_de_configurar,
+    P ! {configurar, [], 3},
     try
         ?assertEqual(not_found, simple_kv:get(P, ausente)),
         ?assertEqual({messages, []}, process_info(P, messages))
@@ -83,7 +83,7 @@ limite_y_mayores_versiones_para_varios_alfa_test() ->
             {ok, [P]} = simple_kv:start_link(1, Alfa),
             try
                 lists:foreach(fun(N) ->
-                    P ! {replica, N, {N, {value, N, infinity}}}
+                    P ! {replicar, N, {N, {valor, N, infinity}}}
                 end, Orden),
                 Esperado = [{N, {ok, N}} || N <- lists:nthtail(40 - Alfa, Claves)],
                 Disponibles = [{N, Lectura} || N <- Claves,
@@ -116,8 +116,8 @@ sobrescritura_delete_ttl_y_trafico_remoto_test() ->
 delete_replicado_viejo_conserva_valor_nuevo_test() ->
     {ok, [P]} = simple_kv:start_link(1, 3),
     try
-        P ! {replica, k, {20, {value, nuevo, infinity}}},
-        P ! {replica, k, {10, borrado}},
+        P ! {replicar, k, {20, {valor, nuevo, infinity}}},
+        P ! {replicar, k, {10, borrado}},
         ?assertEqual({ok, nuevo}, simple_kv:get(P, k))
     after
         simple_kv:stop([P])
@@ -138,7 +138,7 @@ versiones_remotas_desplazan_todas_las_locales_antiguas_test() ->
 %% El resultado de un get pendiente ignora referencias ajenas, pares ajenos y duplicados.
 consultas_filtran_respuestas_ajenas_y_duplicadas_test() ->
     con_lectura_retenida(fun(P, Consulta, ParDemorado, Cliente) ->
-        Entrada = {1, {value, remoto, infinity}},
+        Entrada = {1, {valor, remoto, infinity}},
         P ! {respuesta_consulta, make_ref(), self(), {ok, {100, borrado}}},
         P ! {respuesta_consulta, Consulta, desconocido, {ok, {100, borrado}}},
         P ! {respuesta_consulta, Consulta, self(), {ok, Entrada}},
@@ -156,7 +156,7 @@ consultas_filtran_respuestas_ajenas_y_duplicadas_test() ->
 valor_remoto_vence_antes_de_finalizar_get_test() ->
     con_lectura_retenida(fun(P, Consulta, ParDemorado, Cliente) ->
         Vence = erlang:monotonic_time(millisecond) + 60,
-        P ! {respuesta_consulta, Consulta, self(), {ok, {1, {value, temporal, Vence}}}},
+        P ! {respuesta_consulta, Consulta, self(), {ok, {1, {valor, temporal, Vence}}}},
         ?assertEqual(error, consultar_local(P, barrera)),
         Restante = Vence - erlang:monotonic_time(millisecond),
         ?assert(Restante > 0),
@@ -176,7 +176,7 @@ replica_demorada_conserva_copia_para_get_test() ->
         {ok, {Version, desalojado}} = consultar_local(P1, k),
         simple_kv_test_utils:esperar_valor(P1, temporal, not_found, 1500),
         true = erlang:resume_process(P2),
-        ?assertEqual({ok, {Version, {value, k, infinity}}}, consultar_local(P2, k)),
+        ?assertEqual({ok, {Version, {valor, k, infinity}}}, consultar_local(P2, k)),
         Claves = [k, a, b, c, temporal],
         Esperado = [{ok, k}, {ok, a}, {ok, b}, {ok, c}, not_found],
         ?assertEqual(Esperado, lecturas(P1, Claves)),
@@ -189,11 +189,11 @@ replica_demorada_conserva_copia_para_get_test() ->
 %% Un vencido que sale del mapa no se ofrece al par.
 no_se_ofrece_un_vencido_al_desalojarlo_test() ->
     P = spawn_link(fun simple_kv_replica:init/0),
-    P ! {peers, [self()], 3},
+    P ! {configurar, [self()], 3},
     try
         ok = simple_kv:put(P, vencido, descartado, 0),
         escribir(P, [a, b, c]),
-        ?assertNotMatch({ok, {_, {value, _, _}}}, consultar_local(P, vencido)),
+        ?assertNotMatch({ok, {_, {valor, _, _}}}, consultar_local(P, vencido)),
         receive
             {ofrecer, vencido, Entrada} -> error({ofrecio_vencido, Entrada})
         after 0 -> ok
@@ -209,7 +209,7 @@ retencion_fisica_ttl_test() ->
         escribir(P, [a, b, c]),
         ok = simple_kv:put(P, d, vencido, 0),
         ?assertEqual(not_found, simple_kv:get(P, d)),
-        ?assertMatch({ok, {_, {value, vencido, _}}}, consultar_local(P, d)),
+        ?assertMatch({ok, {_, {valor, vencido, _}}}, consultar_local(P, d)),
         ?assertEqual([not_found, {ok, b}, {ok, c}], lecturas(P, [a, b, c]))
     after
         simple_kv:stop([P])
@@ -225,7 +225,7 @@ vencida_sale_al_perder_proteccion_test() ->
         escribir(P, [d, e]),
         inyectar_escrituras_remotas(P, [f]),
         ?assertMatch({ok, {_, desalojado}}, consultar_local(P, b)),
-        ?assertMatch({ok, {_, {value, vencido, _}}}, consultar_local(P, c)),
+        ?assertMatch({ok, {_, {valor, vencido, _}}}, consultar_local(P, c)),
         ?assertEqual(not_found, simple_kv:get(P, c)),
         inyectar_escrituras_remotas(P, [g]),
         ?assertMatch({ok, {_, desalojado}}, consultar_local(P, c)),
@@ -242,7 +242,7 @@ delete_libera_plaza_de_vencido_protegido_test() ->
         ok = simple_kv:put(P, c, vencido, 0),
         {ok, Entrada} = consultar_local(P, c),
         ok = simple_kv:delete(P, c),
-        P ! {replica, c, Entrada},
+        P ! {replicar, c, Entrada},
         escribir(P, [d]),
         ?assertMatch({ok, {_, borrado}}, consultar_local(P, c)),
         ?assertEqual([{ok, a}, {ok, b}, not_found, {ok, d}], lecturas(P, [a, b, c, d]))
@@ -253,15 +253,15 @@ delete_libera_plaza_de_vencido_protegido_test() ->
 %% Una oferta puede reutilizar un vencido elegible, sin desalojar vigentes ni reenviar ofertas.
 oferta_reutiliza_vencido_elegible_test() ->
     P = spawn_link(fun simple_kv_replica:init/0),
-    P ! {peers, [self()], 4},
+    P ! {configurar, [self()], 4},
     try
         Inicio = simple_kv_replicacion:nueva_version(),
         escribir(P, [a]),
         ok = simple_kv:put(P, b, vencido, 0),
         escribir(P, [c, d]),
-        P ! {ofrecer, e, {simple_kv_replicacion:nueva_version(), {value, e, infinity}}},
+        P ! {ofrecer, e, {simple_kv_replicacion:nueva_version(), {valor, e, infinity}}},
         ?assertMatch({ok, {_, desalojado}}, consultar_local(P, b)),
-        P ! {ofrecer, f, {simple_kv_replicacion:nueva_version(), {value, f, infinity}}},
+        P ! {ofrecer, f, {simple_kv_replicacion:nueva_version(), {valor, f, infinity}}},
         ?assertEqual(error, consultar_local(P, f)),
         ?assertEqual([{ok, K} || K <- [a, c, d, e]], lecturas(P, [a, c, d, e])),
         receive
@@ -278,8 +278,8 @@ escribir(P, Claves) ->
 
 inyectar_escrituras_remotas(P, Claves) ->
     lists:foreach(fun(Clave) ->
-        Entrada = {simple_kv_replicacion:nueva_version(), {value, Clave, infinity}},
-        P ! {replica, Clave, Entrada}
+        Entrada = {simple_kv_replicacion:nueva_version(), {valor, Clave, infinity}},
+        P ! {replicar, Clave, Entrada}
     end, Claves).
 
 lecturas(P, Claves) ->
@@ -296,7 +296,7 @@ consultar_local(P, Clave) ->
 con_lectura_retenida(Verificar) ->
     ParDemorado = spawn(fun responder_al_liberar/0),
     P = spawn_link(fun simple_kv_replica:init/0),
-    P ! {peers, [self(), ParDemorado], 3},
+    P ! {configurar, [self(), ParDemorado], 3},
     Padre = self(),
     Cliente = spawn(fun() -> Padre ! {lectura, self(), simple_kv:get(P, k)} end),
     try

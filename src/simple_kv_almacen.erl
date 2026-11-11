@@ -17,7 +17,7 @@ registrar_metadatos(Clave, {Version, Contenido}, Metadatos) ->
     Estado =
         case Contenido of
             borrado -> borrado;
-            {value, _, _} -> valor
+            {valor, _, _} -> valor
         end,
     case maps:find(Clave, Metadatos) of
         {ok, {Version, desalojado}} when Estado =:= valor ->
@@ -34,7 +34,7 @@ aplicar_actualizacion(Clave, {VersionNueva, Contenido} = Nueva, Valores, Metadat
         {ok, {VersionActual, Estado}} when VersionActual == VersionNueva ->
             %% Una copia de igual versión puede completar un desalojo previo.
             case {Estado, Contenido} of
-                {desalojado, {value, _, _}} ->
+                {desalojado, {valor, _, _}} ->
                     maps:put(Clave, Nueva, Valores);
                 _ ->
                     Valores
@@ -44,7 +44,7 @@ aplicar_actualizacion(Clave, {VersionNueva, Contenido} = Nueva, Valores, Metadat
         _ ->
             case Contenido of
                 borrado -> maps:remove(Clave, Valores);
-                {value, _, _} -> maps:put(Clave, Nueva, Valores)
+                {valor, _, _} -> maps:put(Clave, Nueva, Valores)
             end
     end.
 

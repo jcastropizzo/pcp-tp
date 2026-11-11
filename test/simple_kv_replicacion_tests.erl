@@ -3,7 +3,7 @@
 
 elige_mayor_sin_importar_orden_test() ->
     Vieja = {ok, {3, borrado}},
-    Nueva = {ok, {8, {value, rojo, infinity}}},
+    Nueva = {ok, {8, {valor, rojo, infinity}}},
     ?assertEqual(Nueva, simple_kv_replicacion:elegir_mayor(Vieja, Nueva)),
     ?assertEqual(Nueva, simple_kv_replicacion:elegir_mayor(Nueva, Vieja)).
 
