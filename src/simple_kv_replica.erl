@@ -85,33 +85,13 @@ loop(Peers, Alfa, Map, Metadatos, Recientes, Pendientes) ->
             loop(Peers, Alfa, NewMap, NuevosMetadatos, NuevosRecientes, Pendientes);
         %% ---------- respuesta a una consulta mia (4.8) ----------
         {respuesta_consulta, ConsultaRef, Peer, Resultado} ->
-            case maps:find(ConsultaRef, Pendientes) of
-                {ok, {Client, Ref, Key, Faltan, Mejor}} ->
-                    case lists:member(Peer, Faltan) of
-                        false ->
-                            loop(Peers, Alfa, Map, Metadatos, Recientes, Pendientes);
-                        true ->
-                            NuevoMejor = simple_kv_replicacion:elegir_mayor(Mejor, Resultado),
-                            Restantes = lists:delete(Peer, Faltan),
-                            case Restantes of
-                                [] ->
-                                    %% respondieron todos: comparo una ultima vez
-                                    %% con lo local (pudo cambiar mientras esperaba)
-                                    Final = simple_kv_replicacion:elegir_mayor(
-                                        NuevoMejor,
-                                        simple_kv_almacen:buscar_local(Key, Map, Metadatos)),
-                                    responder_lectura(Client, Ref, Final),
-                                    loop(Peers, Alfa, Map, Metadatos, Recientes,
-                                         maps:remove(ConsultaRef, Pendientes));
-                                _ ->
-                                    Actualizado = {Client, Ref, Key, Restantes, NuevoMejor},
-                                    loop(Peers, Alfa, Map, Metadatos, Recientes,
-                                         maps:put(ConsultaRef, Actualizado, Pendientes))
-                            end
-                    end;
-                error ->
-                    loop(Peers, Alfa, Map, Metadatos, Recientes, Pendientes)
-            end;
+            {NuevosPendientes, Respuesta} =
+                procesar_respuesta_consulta(ConsultaRef, Peer, Resultado, Map, Metadatos, Pendientes),
+            case Respuesta of
+                sin_respuesta -> ok;
+                {Client, Ref, Final} -> responder_lectura(Client, Ref, Final)
+            end,
+            loop(Peers, Alfa, Map, Metadatos, Recientes, NuevosPendientes);
 
         %% ---------- descartar mensajes inesperados (5.1) ----------
         _ ->
@@ -127,6 +107,29 @@ consultar_pares(Peers, Client, Ref, Key, Local, Pendientes) ->
         Peers
     ),
     maps:put(ConsultaRef, {Client, Ref, Key, Peers, Local}, Pendientes).
+
+procesar_respuesta_consulta(ConsultaRef, Peer, Resultado, Map, Metadatos, Pendientes) ->
+    case maps:find(ConsultaRef, Pendientes) of
+        error ->
+            {Pendientes, sin_respuesta};
+        {ok, {Client, Ref, Key, Faltan, Mejor}} ->
+            case lists:delete(Peer, Faltan) of
+                Faltan ->
+                    {Pendientes, sin_respuesta};
+                Restantes ->
+                    NuevoMejor = simple_kv_replicacion:elegir_mayor(Mejor, Resultado),
+                    case Restantes of
+                        [] ->
+                            %% El estado local pudo cambiar mientras llegaban las respuestas.
+                            Local = simple_kv_almacen:buscar_local(Key, Map, Metadatos),
+                            Final = simple_kv_replicacion:elegir_mayor(NuevoMejor, Local),
+                            {maps:remove(ConsultaRef, Pendientes), {Client, Ref, Final}};
+                        [_ | _] ->
+                            Actualizado = {Client, Ref, Key, Restantes, NuevoMejor},
+                            {maps:put(ConsultaRef, Actualizado, Pendientes), sin_respuesta}
+                    end
+            end
+    end.
 
 responder_lectura(Client, Ref, error) ->
     Client ! {Ref, not_found};
