@@ -171,13 +171,15 @@ valor_remoto_vence_antes_de_finalizar_get_test() ->
         receive {leido, Rdo} -> ?assertEqual(not_found, Rdo) after 1000 -> error(sin_resultado) end
     after simple_kv:stop([P]), exit(Gate, kill) end.
 
-put_ttl_cero_con_mapa_lleno_no_desaloja_otras_claves_test() ->
+put_ttl_cero_reciente_ocupa_lugar_y_no_se_devuelve_test() ->
     {ok, [P]} = simple_kv:start_link(1, 3),
     try
         lists:foreach(fun(N) -> simple_kv:put(P, N, N) end, [1,2,3]),
         ok = simple_kv:put(P, nueva, vencida, 0),
-        lists:foreach(fun(N) -> ?assertEqual({ok,N}, simple_kv:get(P,N)) end, [1,2,3]),
-        ?assertEqual(not_found, simple_kv:get(P,nueva))
+        ?assertEqual(not_found,simple_kv:get(P,1)),
+        lists:foreach(fun(N) -> ?assertEqual({ok,N}, simple_kv:get(P,N)) end, [2,3]),
+        ?assertEqual(not_found, simple_kv:get(P,nueva)),
+        ?assertMatch(#{nueva := {_,{value,vencida,_}}},map_local(P,[1,2,3,nueva]))
     after simple_kv:stop([P]) end.
 
 delete_replicado_viejo_conserva_valor_nuevo_test() ->

@@ -19,7 +19,7 @@ Los metadatos pueden crecer con la cantidad de claves conocidas. No se recolecta
 
 El vencimiento se calcula como `monotonic_time(millisecond) + TTL` una única vez al escribir; `infinity` se conserva. Todas las réplicas comparten reloj monotónico en la VM. Replicar u ofrecer conserva el instante absoluto: recibir una copia no renueva su vida.
 
-Un valor es vigente cuando `ahora < Vence`. La API vuelve a comprobar TTL al finalizar una lectura, incluso si el candidato llegó antes y venció mientras faltaban respuestas. TTL cero reemplaza lógicamente una escritura anterior por información vencida, sin desalojar otra clave. Los vencidos se retiran también al reservar espacio y recibir ofertas, conservando versión como `borrado`.
+Un valor es vigente cuando `ahora < Vence`. La API vuelve a comprobar TTL al finalizar una lectura, incluso si el candidato llegó antes y venció mientras faltaban respuestas. TTL cero se guarda como una entrada vencida, sin transformarla en borrado. Si está entre las recientes protegidas se conserva físicamente y ocupa un lugar, aunque get devuelva not_found. Un delete explícito sí puede eliminarla. No se realiza limpieza indiscriminada de vencidos.
 
 No se usan behaviours OTP, ETS, DETS, Mnesia, `persistent_term` ni diccionario del proceso. Los módulos auxiliares operan sobre los mapas recibidos como argumentos.
 
@@ -39,7 +39,7 @@ Abreviaturas: C = cliente, R = réplica, P = par, I = invocante de inicio/cierre
 | `{Ref, candidato, Resultado}` | R → C | Entrega un candidato de lectura; el cliente reduce por versión. |
 | `{Ref, fin}` | R → C | No quedan respuestas: el cliente comprueba TTL y retorna. |
 | `{replica, Key, E}` | R → todos sus P | Aplica versión aceptable; controla capacidad si es valor. No confirma ni vuelve a replicar. |
-| `{ofrecer, Key, E}` | R → todos sus P | Ofrece un valor antes de descartarlo. Se acepta solo vigente, sin versión más nueva y con espacio o reemplazo. No se reenvía. |
+| `{ofrecer, Key, E}` | R → todos sus P | Ofrece un valor antes de descartarlo. Acepta versión adecuada con vacante, reemplazo o vencido no protegido. No desaloja vigentes ni reenvía. |
 | `{consultar, R, ConsultaRef, Key}` | R → P | P contesta solo con su estado local; no inicia otra consulta. |
 | `{respuesta_consulta, ConsultaRef, P, Resultado}` | P → R | Si P falta en esa consulta, reenvía candidato a C y elimina P de Faltan. |
 | `stop` | I → R | R termina normalmente. No manda confirmación explícita. |
@@ -61,41 +61,45 @@ Un delete produce `{Version, borrado}`. Aunque se elimine el valor de Map, Metad
 
 Desalojar conserva `{Version, desalojado}`. Esta marca no significa que el dato dejó de existir: habilita la consulta a pares y la recuperación de una copia de igual versión. Para igual versión, `aplicar_actualizacion/4` solo repone un valor cuando el estado era desalojado. `elegir_mayor/2` prefiere el valor a la marca de desalojo de esa misma versión. Una lápida de borrado no se revierte mediante esa excepción.
 
-La limpieza de un valor vencido conserva su versión como borrado. No crea una escritura nueva. Una copia de igual versión tiene el mismo vencimiento absoluto y tampoco es visible después de ese instante, aun si aún conserva físicamente el valor.
+Vencer no crea una lápida ni una versión nueva. La entrada protegida permanece con estado valor y su vencimiento original. Al desalojar un vencido elegible se conserva su versión como desalojado. Las lápidas borrado corresponden a delete explícito. Una copia vencida nunca vuelve a ser visible por recibirla de nuevo.
 
 ### Convergencia y capacidad: alcance de la garantía
 
-El criterio exigido es igualdad de los mapas de valores al cesar las escrituras y procesarse los mensajes. Acuerdo en versiones con distintas copias físicas no se considera suficiente. La política selecciona las Alfa versiones mayores, sin proteger por origen local.
+El criterio exigido es igualdad de los mapas de valores al cesar las escrituras y procesarse los mensajes. Acuerdo en versiones con distintas copias físicas no se considera suficiente. La política protege las Q=ceil(3·Alfa/4) versiones mayores, sin cupos por origen; entre las restantes prioriza vencidos. Con TTL infinito equivale a conservar las Alfa versiones mayores.
 
 Para puts de claves distintas con TTL infinito, cada recepción retiene el máximo conjunto de hasta Alfa entradas por versión entre las ya vistas. Incorporar una nueva entrada y quitar el mínimo equivale a calcular top-Alfa. Esta operación es independiente del orden y de duplicados; después de recibir el mismo conjunto, los mapas son iguales. Una versión menor para una clave ya actualizada no reemplaza la mayor.
 
 No se extiende esta demostración automáticamente a borrados, sobrescrituras ni vencimientos: descartar una copia y luego eliminar otra clave puede dejar una vacante sin recuperar la anterior. Caso comprobado con Alfa=3: a1,b2,c3,d4,delete(d)5 produce b,c; delete(d)5,a1,b2,c3,d4 produce a,b,c. La versión d4 se ignora en el segundo orden por la lápida d5. Todos recibieron las mismas operaciones, pero los mapas difieren.
 
-Falta resolver recuperación/reconciliación de copias y limpieza de TTL para cerrar igualdad física final. La V5 permite pérdida por saturación, pero eso no demuestra igualdad de los conjuntos restantes. El documento registra este límite; los tests aprobados no certifican convergencia integral.
+Falta resolver recuperación/reconciliación de copias y el efecto del instante de vencimiento en las decisiones para cerrar igualdad física final. La V5 permite pérdida por saturación, pero eso no demuestra igualdad de los conjuntos restantes. El documento registra este límite; los tests aprobados no certifican convergencia integral.
 
 ---
 
-## 4. Capacidad y selección por versión
+## 4. Capacidad, protección por recencia y TTL
 
-La réplica reserva lugar antes de insertar. Primero retira vencidos. Si la clave ya está o queda una vacante, aplica la escritura aceptable. Si está llena, compara la versión entrante con la menor versión de todo el mapa. Si es mayor, ofrece y desaloja esa entrada antes de guardar; si es menor, ofrece y descarta el propio valor recibido, conservando versión y marca de desalojo.
+La V5 (§4.7) establece: «el 75 % escrito más recientemente (en el nodo local) siempre siga disponible». En §4.6 establece: «nunca se devuelve un valor vencido». La misma sección 4.7 dice: «No es válido tener entradas adicionales en alguna estructura secundaria, α es el tope de valores permitidos para un nodo.»
 
-La regla no distingue put local de replicación remota. No existe estado Locales ni cupo local protegido. Un put local genera la versión más alta de la VM y entra; una replicación atrasada puede perder frente a todas las residentes. La selección no depende del orden de las claves ni del TTL relativo: el TTL solo determina vigencia.
+Decisión de diseño: conservar físicamente las entradas recientes aunque venzan y filtrar TTL al leer. Esa conservación física y el redondeo no son citas literales de la consigna. Se define Q=ceil(3·Alfa/4), para proteger al menos el 75 %. La recencia se calcula por versión sobre residentes más entrante, sin cupos independientes por origen.
 
-### Cota de almacenamiento
+### Árbol de decisión
 
-El estado inicial tiene cero valores. Cada inserción reemplaza una clave existente, usa una vacante o retira una entrada antes de agregar otra. Nunca se construye un mapa con Alfa+1 entradas. Deletes y limpieza reducen tamaño; una oferta solo entra con espacio o reemplazo. Por inducción, todos los estados de almacenamiento respetan Alfa.
+Una versión vieja se ignora; una sobrescritura aceptable reemplaza su clave sin ocupar otro lugar. Si el mapa tiene menos de Alfa entradas, se guarda la nueva aunque esté vencida. Un vencido protegido no se considera una vacante.
 
-La selección mantiene las Alfa versiones mayores entre los candidatos recibidos y disponibles en el escenario de inserciones sin invalidaciones. No puede reconstruir una copia descartada cuando posteriormente queda espacio: ese es el pendiente de reconciliación expuesto en la sección 3.
+Con el mapa lleno se ordenan las versiones de residentes y entrante sin construir un segundo mapa de valores. Se excluyen del desalojo las Q mayores. Entre las restantes se elige un vencido; si hay varios, el de menor versión. Si ninguno venció, se elige la menor versión elegible. Puede descartarse el propio entrante.
 
-### Ofertas y terminación
+Si el candidato reside en Map, se lo retira antes de insertar; nunca hay Alfa+1 entradas almacenadas. Antes de descartar un vigente se lo ofrece a todos los pares. Un vencido se descarta sin ofrecer. En ambos casos se conserva versión con estado desalojado, no borrado. Un delete explícito sí quita una entrada protegida y deja lápida.
 
-Antes de descartar un valor vigente se lo ofrece a todos los pares. Una oferta se acepta si está vigente, no hay una versión posterior y hay espacio o reemplaza una clave existente. Procesarla no provoca desalojos ni reenvíos; por eso no desencadena una cadena de mensajes. Las replicaciones no se vuelven a replicar. Para un número finito de escrituras hay un número finito de ofertas.
+Ejemplo con Alfa=4: residentes de versiones 1 vigente, 2 vencida, 3 y 4 vigentes; entrante 5. Q=3 protege 3,4,5; sale 2 y permanece 1. No es top-Alfa puro cuando interviene TTL. Si la vencida fuera 4, seguiría protegida y saldría 1.
 
-Una oferta no funciona como reconciliación completa: un nodo lleno puede rechazarla y quedar con espacio después. No se afirma que las ofertas por sí solas cierren el pendiente de convergencia.
+### Cota y ofertas
 
-### Requisito del 75 % local
+El estado inicial está vacío. Cada inserción usa vacante, reemplaza su clave o retira un residente antes de agregar el nuevo. Nunca se supera Alfa, y no se almacenan valores adicionales en Pendientes ni otra caché de la réplica. El ranking auxiliar contiene solo claves/versiones.
 
-Se adopta selección global por mayor versión para buscar mapas iguales. La redacción del 75 % local requiere aclaración frente a ese objetivo: con Alfa=3, dos nodos que escribieron tres claves distintas cada uno no pueden conservar sus seis claves en un mapa común de tres entradas. No se garantiza protección independiente de las últimas escrituras locales frente a todas las remotas. Esa interpretación queda explícitamente pendiente, en vez de introducir una excepción que rompe la igualdad final.
+Una oferta puede ocupar una vacante, reemplazar su clave o reutilizar un vencido no protegido mediante el mismo ranking. No desaloja vigentes ni genera mensajes. Rechazar una oferta no limpia otros vencidos. Una copia aceptada mantiene el TTL recibido, aunque haya expirado en tránsito: get no la devuelve. Cada descarte por put/replicación genera como máximo una oferta por par y ninguna oferta genera otras; el intercambio termina.
+
+### Límites
+
+Esta protección no es un cupo independiente para escrituras originadas en cada nodo. La interpretación de «en el nodo local» frente a mapas finales iguales sigue pendiente de confirmación con cátedra. La política tampoco recupera por sí sola copias descartadas cuando aparece una vacante; los casos abiertos de convergencia se detallan en la sección 3.
 
 ---
 
@@ -117,6 +121,6 @@ La réplica que consulta vuelve al ciclo normal: puede atender puts, deletes, of
 
 `rebar3 compile` y `rebar3 eunit` compilan con `warn_all` y `warnings_as_errors`. También se puede compilar directamente con `erlc +warn_all -Werror`. Los tests cubren API y validaciones, enlaces, términos compuestos, TTL y reemplazos, propagación, conflictos desordenados/concurrentes, borrados sin resurrección, capacidad receptora, selector, ofertas y lecturas remotas.
 
-Las regresiones V5 cubren el límite y las mayores versiones para Alfa de 3 a 16, órdenes opuestos, tráfico remoto y mapas locales iguales con escritores concurrentes, TTL cero con capacidad llena, cierre demorado más de un segundo, descarte durante inicialización, respuestas duplicadas/ajenas y vencimiento de un candidato mientras falta otro par. Se combinan pruebas por API pública con pruebas internas del protocolo para forzar órdenes concretos; las internas complementan, no sustituyen, el comportamiento observable.
+Las regresiones V5 cubren límite y selección con TTL infinito para Alfa de 3 a 16, órdenes opuestos, tráfico remoto y mapas locales iguales con escritores concurrentes. La suite proteccion_ttl cita §§4.6–4.7 y comprueba almacenamiento físico frente a visibilidad, vencidos protegidos/elegibles, entrante reciente/antiguo, frontera y redondeo para Alfa=3,4,5,7,16, ofertas, replicación, sobrescritura y delete explícito. También se prueban cierre lento, inicialización, filtros de respuestas y vencimiento mientras falta un par. Se combinan pruebas por API pública con pruebas internas del protocolo para forzar órdenes concretos; las internas complementan, no sustituyen, el comportamiento observable.
 
 Las pruebas finitas no demuestran todos los intercalados. La cota, elección de versiones y terminación se justifican por las invariantes anteriores; el cierre integral de convergencia sigue pendiente. La verificación administrativa y el push al repositorio asignado por la cátedra corresponden a los integrantes; el repositorio privado de trabajo no constituye por sí solo la entrega.

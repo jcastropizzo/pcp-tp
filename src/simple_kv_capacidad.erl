@@ -5,121 +5,105 @@
 -type valores() :: #{term() => entry()}.
 -type metadatos() :: #{term() => {integer(), valor | borrado | desalojado}}.
 
-%% Conserva las Alfa entradas de mayor version, sin distinguir origen.
-%% Reserva lugar antes de insertar, sin construir un mapa de Alfa+1 valores.
-guardar(Peers, Alfa, Key, {Version, {value, _, Vence}} = Entry, Map, Metadatos) ->
-    case simple_kv_ttl:vigente(Vence) of
-        false ->
-            Borrado = {Version, borrado},
-            {simple_kv_almacen:aplicar_actualizacion(Key, Borrado, Map, Metadatos),
-             simple_kv_almacen:registrar_metadata(Key, Borrado, Metadatos)};
-        true -> guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos)
-    end.
-
-guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos) ->
-    {Limpio, Meta} = limpiar_vencidos(Map, Metadatos),
-    case maps:is_key(Key, Limpio) orelse map_size(Limpio) < Alfa of
-        true -> aplicar(Key, Entry, Limpio, Meta);
-        false ->
-            {Version, _} = Entry,
-            Candidato = candidato_a_desalojar(Limpio),
-            case Candidato of
-                ninguno -> rechazar(Peers, Key, Entry, Limpio, Meta);
-                {OtraKey, {OtraVersion, _} = OtraEntry} ->
-                    case Version > OtraVersion of
-                        true ->
-                            simple_kv_replicacion:ofrecer(Peers, OtraKey, OtraEntry),
-                            {Reducido, NuevaMeta} = desalojar(OtraKey, Limpio, Meta),
-                            aplicar(Key, Entry, Reducido, NuevaMeta);
-                        false -> rechazar(Peers, Key, Entry, Limpio, Meta)
+%% TTL controla visibilidad, no borrado fisico. Las Q=ceil(3*Alfa/4)
+%% versiones mas recientes se protegen aun vencidas, sin distinguir origen.
+%% Se reserva espacio ANTES de insertar: Map nunca tiene Alfa+1 valores.
+-spec guardar([pid()], pos_integer(), term(), entry(), valores(), metadatos()) ->
+    {valores(), metadatos()}.
+guardar(Peers, Alfa, Key, Entry, Map, Metadatos) ->
+    case simple_kv_almacen:es_mensaje_nuevo(Key, Entry, Metadatos) of
+        false -> {Map, Metadatos};
+        true ->
+            case maps:is_key(Key, Map) orelse map_size(Map) < Alfa of
+                true -> aplicar(Key, Entry, Map, Metadatos);
+                false ->
+                    %% Se considera al entrante sin guardarlo en otro mapa.
+                    {Descarte, Entrada} = elegir_descarte(Key, Entry, Alfa, Map),
+                    case Descarte =:= Key of
+                        true -> rechazar(Peers, Key, Entry, Map, Metadatos);
+                        false ->
+                            ofrecer_si_vigente(Peers, Descarte, Entrada),
+                            {Reducido, Meta} = desalojar(Descarte, Map, Metadatos),
+                            aplicar(Key, Entry, Reducido, Meta)
                     end
             end
     end.
 
-aplicar(Key, {Version, {value, _, Vence}} = Entry, Map, Meta) ->
-    Aplicada = case simple_kv_ttl:vigente(Vence) of
-        true -> Entry;
-        false -> {Version, borrado}
+%% La lista auxiliar contiene SOLO claves/versiones. La proteccion se calcula
+%% sobre residentes + entrante, con Q posiciones de la capacidad Alfa.
+%% Del resto sale primero un vencido (el de menor version si hay varios);
+%% si ninguno vencio, sale la version minima. Puede salir el entrante.
+elegir_descarte(Key, {Version, _} = Entry, Alfa, Map) ->
+    Orden = lists:sort([{Version, Key} | [{V, K} || {K, {V, _}} <- maps:to_list(Map)]]),
+    Q = (3 * Alfa + 3) div 4,
+    Elegibles = lists:sublist(Orden, length(Orden) - Q),
+    EntradaDe = fun(K) ->
+        case K =:= Key of true -> Entry; false -> maps:get(K, Map) end
     end,
-    {simple_kv_almacen:aplicar_actualizacion(Key, Aplicada, Map, Meta),
-     simple_kv_almacen:registrar_metadata(Key, Aplicada, Meta)}.
-
-rechazar(Peers, Key, {Version, {value, _, Vence}} = Entry, Map, Meta) ->
-    case simple_kv_ttl:vigente(Vence) of
-        true ->
-            simple_kv_replicacion:ofrecer(Peers, Key, Entry),
-            {Map, maps:put(Key, {Version, desalojado}, Meta)};
-        false -> {Map, maps:put(Key, {Version, borrado}, Meta)}
+    Vencidos = [{K, E} || {_, K} <- Elegibles,
+                         E = {_, {value, _, Vence}} <- [EntradaDe(K)],
+                         not simple_kv_ttl:vigente(Vence)],
+    case Vencidos of
+        [Primero | _] -> Primero;
+        [] ->
+            [{_, K} | _] = Elegibles,
+            {K, EntradaDe(K)}
     end.
 
-%% ---------------------------------------------------------------------
-%% Recepcion de una oferta
-%%
-%% La replica que recibe la oferta la guarda SOLO si:
-%%  - el valor sigue vigente,
-%%  - no conoce una version mas nueva de la clave, y
-%%  - tiene lugar (o la clave ya ocupa un lugar en su Map).
-%%
-%% Nunca desaloja ni manda mensajes al procesar una oferta. Por eso cada
-%% desalojo genera como mucho un mensaje por par y la secuencia termina.
-%% Si todas las replicas estan llenas, el valor se pierde (lo admite 4.7).
-%% ---------------------------------------------------------------------
+aplicar(Key, Entry, Map, Meta) ->
+    {simple_kv_almacen:aplicar_actualizacion(Key, Entry, Map, Meta),
+     simple_kv_almacen:registrar_metadata(Key, Entry, Meta)}.
+
+%% El vencimiento no fabrica lapidas: solo delete genera 'borrado'.
+rechazar(Peers, Key, {Version, _} = Entry, Map, Meta) ->
+    ofrecer_si_vigente(Peers, Key, Entry),
+    {Map, maps:put(Key, {Version, desalojado}, Meta)}.
+
+ofrecer_si_vigente(Peers, Key, {_, {value, _, Vence}} = Entry) ->
+    case simple_kv_ttl:vigente(Vence) of
+        true -> simple_kv_replicacion:ofrecer(Peers, Key, Entry);
+        false -> ok
+    end.
+
+%% Una oferta nunca genera mensajes ni desaloja vigentes. Puede ocupar una
+%% vacante, reemplazar su clave o reutilizar SOLO un vencido no protegido.
+%% No limpia otros vencidos como efecto lateral ni renueva el TTL recibido.
 -spec aceptar_oferta(term(), term(), pos_integer(), valores(), metadatos()) ->
     {valores(), metadatos()}.
-aceptar_oferta(Key, {_Version, {value, _Val, Vence}} = Entry, Alfa, Map, Metadatos) ->
-    {MapLimpio, MetadatosLimpios} = limpiar_vencidos(Map, Metadatos),
-    Vigente = simple_kv_ttl:vigente(Vence),
-    EsNuevo = simple_kv_almacen:es_mensaje_nuevo(Key, Entry, MetadatosLimpios),
-    HayLugar = maps:is_key(Key, MapLimpio) orelse map_size(MapLimpio) < Alfa,
-    case Vigente andalso EsNuevo andalso HayLugar of
+aceptar_oferta(Key, {_, {value, _, _}} = Entry, Alfa, Map, Metadatos) ->
+    case simple_kv_almacen:es_mensaje_nuevo(Key, Entry, Metadatos) of
+        false -> {Map, Metadatos};
         true ->
-            {simple_kv_almacen:aplicar_actualizacion(Key, Entry, MapLimpio, MetadatosLimpios),
-             simple_kv_almacen:registrar_metadata(Key, Entry, MetadatosLimpios)};
-        false ->
-            {MapLimpio, MetadatosLimpios}
+            case maps:is_key(Key, Map) orelse map_size(Map) < Alfa of
+                true -> aplicar(Key, Entry, Map, Metadatos);
+                false ->
+                    {K, {_, {value, _, Vence}}} = elegir_descarte(Key, Entry, Alfa, Map),
+                    case K =/= Key andalso not simple_kv_ttl:vigente(Vence) of
+                        true ->
+                            {Reducido, Meta} = desalojar(K, Map, Metadatos),
+                            aplicar(Key, Entry, Reducido, Meta);
+                        false -> rechazar([], Key, Entry, Map, Metadatos)
+                    end
+            end
     end;
 aceptar_oferta(_Key, _Entry, _Alfa, Map, Metadatos) ->
     {Map, Metadatos}.
 
-%% ---------------------------------------------------------------------
-%% Auxiliares
-%% ---------------------------------------------------------------------
-
-%% El valor de menor version: el escrito hace mas tiempo.
+%% Selector minimo: el fallback cuando no hay vencidos elegibles.
 -spec candidato_a_desalojar(valores()) -> ninguno | {term(), entry()}.
 candidato_a_desalojar(Valores) when is_map(Valores) ->
     maps:fold(
         fun
-            (Key, Entry, ninguno) ->
+            (Key, Entry, ninguno) -> {Key, Entry};
+            (Key, {Version, _} = Entry, {_, {Actual, _}}) when Version < Actual ->
                 {Key, Entry};
-            (Key, {Version, _} = Entry, {_KeyAcc, {VersionAcc, _}}) when Version < VersionAcc ->
-                {Key, Entry};
-            (_Key, _Entry, Acc) ->
-                Acc
+            (_, _, Acc) -> Acc
         end,
         ninguno,
         Valores
     ).
 
-%% Saca el valor del Map y deja la marca 'desalojado' con SU MISMA version.
 -spec desalojar(term(), valores(), metadatos()) -> {valores(), metadatos()}.
-desalojar(Key, Map, Metadatos) -> 
-    {ok, {Version, _Contenido}} = maps:find(Key, Map),
-    NuevoMap = maps:remove(Key, Map),
-    NuevosMetadatos = maps:put(Key, {Version, desalojado}, Metadatos),
-    {NuevoMap, NuevosMetadatos}.
-
-%% Un valor vencido sale del Map y queda como 'borrado' con su misma
-%% version: ya no existe para nadie y un put viejo atrasado no lo revive.
--spec limpiar_vencidos(valores(), metadatos()) -> {valores(), metadatos()}.
-limpiar_vencidos(Map, Metadatos) ->
-    maps:fold(
-        fun(Key, {Version, {value, _Val, Vence}}, {M, Meta}) ->
-            case simple_kv_ttl:vigente(Vence) of
-                true -> {M, Meta};
-                false -> {maps:remove(Key, M), maps:put(Key, {Version, borrado}, Meta)}
-            end
-        end,
-        {Map, Metadatos},
-        Map
-    ).
+desalojar(Key, Map, Metadatos) ->
+    {ok, {Version, _}} = maps:find(Key, Map),
+    {maps:remove(Key, Map), maps:put(Key, {Version, desalojado}, Metadatos)}.

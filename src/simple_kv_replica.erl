@@ -28,7 +28,7 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes) ->
             ok;
 
         %% ---------- put del cliente ----------
-        %% Reserva lugar antes de insertar; conserva las versiones mas recientes sin distinguir origen.
+        %% Reserva lugar antes de insertar; no elimina vencidos del 75 % protegido.
         %% Sobrescribir una clave existente no aumenta el tamano.
         {put, Client, Ref, Key, Val, Time} ->
             Entry = {simple_kv_replicacion:nueva_version(),
@@ -88,7 +88,7 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes) ->
             loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes);
 
         %% ---------- otra replica me ofrece un valor que va a desalojar ----------
-        %% Nunca desaloja ni envia mensajes: la cadena termina aca.
+        %% Puede reutilizar un vencido no protegido; nunca envia otros mensajes.
         {ofrecer, Key, Entry} ->
             {NewMap, NuevosMetadatos} =
                 simple_kv_capacidad:aceptar_oferta(Key, Entry, Alfa, Map, Metadatos),

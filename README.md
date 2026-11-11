@@ -6,21 +6,63 @@ Almacén Erlang entre procesos de una misma VM BEAM. Requisitos: [consigna V5](c
 
 ## Qué hay y qué falta
 
-Selector corregido y pruebas actualizadas. El cierre integral de convergencia sigue pendiente por los casos de borrado/TTL indicados abajo. Compilación estricta y **78 tests aprobados**, incluyendo capacidad bajo tráfico remoto, selección de mayores versiones, cierre lento y consultas simultáneas.
+Selector corregido y pruebas actualizadas. El cierre integral de convergencia sigue pendiente por los casos de borrado/TTL indicados abajo. Compilación estricta y **94 tests aprobados**, incluyendo protección por recencia frente a TTL, capacidad bajo tráfico remoto, cierre lento y consultas simultáneas.
 
 **Pendiente de los integrantes:** confirmar cuentas informadas a docentes, llevar los archivos al repositorio asignado y verificar el push final. Este es un repositorio privado de trabajo: publicar aquí no constituye la entrega.
 
 Los checks indican comportamiento implementado con evidencia de código/pruebas o argumento en el informe. Una suite finita no demuestra todos los intercalados concurrentes.
 
-## Política de desalojo y criterio de convergencia
+## Política de desalojo: recencia protegida y TTL
 
-**Regla acordada:** elegir siempre las α entradas de mayor versión entre los valores vigentes disponibles, sin excepciones por réplica de origen. Cuando hay que hacer lugar se compara el entrante con el mínimo de todo el mapa: se descarta la versión menor. No hay cupo de protección local ni estado `Locales`.
+Fuente: [consigna V5, §§4.6–4.7](consigna/kv_replicado.pdf). Citas textuales:
 
-**Convergencia significa mapas iguales**, no solo acuerdo sobre versiones. Con puts de claves distintas y TTL infinito, recibir el mismo conjunto de escrituras produce el mismo mapa de α versiones mayores, sin importar el orden. Hay pruebas que comparan el contenido LOCAL de los nodos; `get/2` solo no alcanza porque puede recuperar valores de otro nodo.
+> «el 75 % escrito más recientemente (en el nodo local) siempre siga disponible» (§4.7).
 
-- [x] Eliminar la excepción local y verificar selección independiente del origen y del orden.
-- [ ] Cerrar convergencia con borrados y TTL: el selector por sí solo no repone valores desalojados. Caso comprobado, α=3: recibir `a1,b2,c3,d4,delete(d)5` deja `{b,c}`; recibir `delete(d)5,a1,b2,c3,d4` deja `{a,b,c}`. Se procesan las mismas operaciones, pero los mapas difieren si no se recuperan copias. La limpieza perezosa de vencidos también necesita revisión para exigir igualdad física de mapas.
-- [ ] Resolver la interpretación de «75 % escrito más recientemente en el nodo local» frente a igualdad final de mapas. Se adopta selección global por versión; no se afirma protección independiente de escrituras locales.
+> «nunca se devuelve un valor vencido» (§4.6).
+
+> «No es válido tener entradas adicionales en alguna estructura secundaria, α es el tope de valores permitidos para un nodo.» (§4.7).
+
+**Decisión de diseño acordada:** conservar físicamente las entradas del 75 % protegido aunque estén vencidas; `get` devuelve `not_found` para ellas. El PDF no prescribe literalmente esa conservación física ni el redondeo: son la interpretación implementada. Se usa Q = ceil(3α/4), redondeando hacia arriba. La recencia se ordena por versión entre las entradas residentes y la entrante, sin cupos separados por origen. No se agrega un estado `Locales`.
+
+### Árbol de decisión para put y replicación
+
+1. Descartar versiones anteriores a la conocida. Una sobrescritura aceptable reemplaza su clave sin desalojar otra.
+2. Si `map_size(Map) < α`, guardar la entrada, **incluso si ya venció**. Vencido no implica borrado físico ni vacante automática.
+3. Si no hay espacio, considerar residentes más entrante sin construir otro mapa de valores. Proteger las Q versiones mayores, incluido el entrante si le corresponde.
+4. Entre los **no protegidos**, elegir primero un vencido; si hay varios, el de menor versión. Si ninguno venció, elegir la menor versión elegible.
+5. El candidato puede ser el entrante. Si sale un residente, retirarlo antes de insertar para no superar α. Antes de descartar un vigente, ofrecerlo a los pares; un vencido no se ofrece.
+6. Conservar versión y estado `desalojado` al descartar. TTL no fabrica una lápida `borrado`; esa marca corresponde a `delete` explícito, que sí puede quitar una entrada protegida.
+
+La preferencia por vencidos solo opera fuera del cupo protegido: **no es una política top-α pura cuando hay TTL**. Por ejemplo, α=4, versiones 1 vigente, 2 vencida, 3 y 4 vigentes, entrante 5: se protegen 3,4,5 y se retira 2, conservando 1.
+
+### Ofertas y lecturas
+
+Una oferta puede ocupar una vacante, reemplazar su clave o reutilizar un vencido no protegido mediante el mismo ranking. Nunca desaloja vigentes ni genera otros mensajes. Una oferta rechazada no limpia entradas protegidas como efecto lateral. Si se conserva una copia vencida, mantiene su vencimiento y sigue siendo invisible para `get`.
+
+Las lecturas no quitan las entradas vencidas del mapa. La comprobación final de TTL en el cliente evita devolverlas incluso si vencieron mientras faltaban respuestas remotas.
+
+### Verificación del criterio
+
+Los tests citan la consigna y separan visibilidad por API de almacenamiento físico mediante consultas locales. Suite específica: `test/simple_kv_proteccion_ttl_tests.erl`.
+
+| Caso | Resultado exigido |
+| --- | --- |
+| Vencido dentro de las Q recientes | Permanece en Map con metadato `valor`; get responde `not_found` |
+| Vencido fuera de las Q recientes | Se prefiere antes que un vigente elegible más viejo |
+| Ningún vencido elegible | Sale la menor versión no protegida |
+| Entrante vencido reciente / antiguo | Se conserva si está protegido; puede descartarse si es elegible |
+| α=3,4,5,7,16 | Q se redondea hacia arriba y nunca se supera α |
+| Replicación, ofertas y sobrescrituras | No limpian protegidos; no renuevan TTL ni crean borrados por vencer |
+| `delete` explícito | Elimina y deja lápida aunque la entrada estuviera protegida |
+
+### Convergencia pendiente
+
+**Convergencia significa mapas iguales**, no solo acuerdo sobre versiones. Con puts de claves distintas y TTL infinito, se conserva el mismo top-α tras recibir las mismas escrituras. Hay pruebas que comparan contenido local, sin `get/2`, que podría ocultar diferencias consultando un par.
+
+- [x] Proteger por recencia sin excepción de origen y conservar físicamente protegidos vencidos.
+- [x] Priorizar vencidos exclusivamente entre no protegidos, incluyendo al entrante.
+- [ ] Cerrar convergencia con borrados, sobrescrituras y TTL. Caso comprobado, α=3: `a1,b2,c3,d4,delete(d)5` deja `{b,c}`; `delete(d)5,a1,b2,c3,d4` deja `{a,b,c}`. El selector no recupera copias descartadas cuando aparece una vacante. La preferencia por vencidos puede además depender del instante de recepción.
+- [ ] Confirmar con cátedra la interpretación de «en el nodo local» frente a igualdad final de mapas: no se garantiza un cupo independiente por origen.
 
 ## Checklist de requisitos V5
 
@@ -47,16 +89,16 @@ Los checks indican comportamiento implementado con evidencia de código/pruebas 
 - [x] Vencimiento absoluto con reloj monotónico compartido en la VM; recibir una copia no renueva TTL.
 - [x] Casos 0, `infinity`, finitos, inválidos y sobrescrituras.
 - [x] Comprobación de vigencia en el cliente al finalizar get, también si un candidato remoto vence mientras faltan respuestas.
-- [x] Limpieza de vencidos con conservación de versión; TTL cero con capacidad llena no desaloja otra clave vigente.
+- [x] Conservación física de vencidos protegidos, incluso TTL cero; nunca son devueltos. Solo se reutilizan vencidos no protegidos al necesitar espacio.
 
 ### Capacidad y desalojo — §4.7
 
 - [x] Capacidad α recibida al iniciar; mapa con como máximo α valores. Se reserva espacio antes de insertar.
 - [x] Sin copias de valores en estructuras secundarias de las réplicas: `Pendientes` contiene solo control de consultas. La reducción de resultados se realiza en el cliente.
-- [x] Seleccionar las α versiones mayores, comparando el entrante con el mínimo global del mapa, sin distinción de origen.
+- [x] Proteger Q = ceil(3α/4) versiones mayores, con entrante incluido; entre el resto priorizar vencidos y luego menor versión. Sin cupos por origen.
 - [x] Sobrescritura llena sin desalojar otra clave; selector por versión con varios `infinity`; capacidad receptora y duplicados.
 - [x] Valores vigentes ofrecidos a todos los pares antes de descartarlos.
-- [x] Ofertas aceptadas solo con espacio o reemplazo, vigencia y versión aceptable. No desalojan ni reenvían: intercambio finito.
+- [x] Ofertas con versión aceptable: usan vacante, reemplazo o vencido no protegido; nunca desalojan vigentes ni reenvían. Conservan TTL incluso si expiró en tránsito.
 - [x] Pruebas de límite y selección para α de 3 a 16, tres órdenes de entrega, desplazamiento de valores locales por remotos y mapas iguales con escritores concurrentes. Pruebas funcionales de deletes, TTL y sobrescrituras.
 
 ### Lecturas y concurrencia — §4.8 y §5
@@ -84,7 +126,7 @@ rebar3 compile
 rebar3 eunit
 ```
 
-**Verificación del 10/11/2026:** ambos comandos aprobados y **78/78 tests EUnit**; compilación adicional con `erlc +warn_all -Werror` aprobada. Los tests combinan API pública con pruebas internas que fuerzan órdenes concretos. No distribuir `.beam` ni `_build/`: son productos generados y pueden ocultar fuentes actuales.
+**Verificación del 10/11/2026:** ambos comandos aprobados y **94/94 tests EUnit**; compilación adicional con `erlc +warn_all -Werror` aprobada. Los tests combinan API pública con pruebas internas que fuerzan órdenes concretos. No distribuir `.beam` ni `_build/`: son productos generados y pueden ocultar fuentes actuales.
 
 | Archivo | Responsabilidad |
 | --- | --- |
@@ -92,7 +134,7 @@ rebar3 eunit
 | `src/simple_kv_replica.erl` | Ciclo de mensajes y control de consultas pendientes |
 | `src/simple_kv_almacen.erl` | Metadatos y aplicación de versiones |
 | `src/simple_kv_replicacion.erl` | Versiones, propagación, ofertas y selección de respuestas |
-| `src/simple_kv_capacidad.erl` | Reserva de espacio, selección por versión, ofertas y desalojo |
+| `src/simple_kv_capacidad.erl` | Reserva de espacio, protección por recencia, ofertas y desalojo |
 | `src/simple_kv_ttl.erl` | Cálculo y validación de vencimiento |
 | `test/` | Suite EUnit, incluidas regresiones de la V5 |
 
