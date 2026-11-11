@@ -23,10 +23,23 @@ put(Pid, Key, Val, Time) when
 get(Pid, Key) ->
     Ref = make_ref(),
     Pid ! {get, self(), Ref, Key},
+    esperar_get(Ref, error).
+
+%% Los resultados remotos se reducen en el cliente: una replica no conserva
+%% valores adicionales en Pendientes, fuera de su capacidad Alfa.
+esperar_get(Ref, Mejor) ->
     receive
-        {Ref, ok, Val} -> {ok, Val};
-        {Ref, not_found} -> not_found
+        {Ref, candidato, Resultado} ->
+            esperar_get(Ref, simple_kv_replicacion:elegir_mayor(Mejor, Resultado));
+        {Ref, fin} -> resultado_get(Mejor)
     end.
+
+resultado_get({ok, {_, {value, Val, Vence}}}) ->
+    case simple_kv_ttl:vigente(Vence) of
+        true -> {ok, Val};
+        false -> not_found
+    end;
+resultado_get(_) -> not_found.
 
 delete(Pid, Key) ->
     Ref = make_ref(),
@@ -54,7 +67,6 @@ stop(Pids) ->
             Pid ! stop,
             receive
                 {'DOWN', Monitor, process, Pid, _Motivo} -> ok
-            after 1000 -> erlang:error(timeout)
             end
         end,
         Pids

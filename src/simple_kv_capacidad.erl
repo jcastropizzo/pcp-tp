@@ -1,50 +1,88 @@
 -module(simple_kv_capacidad).
--export([hacer_lugar/4, aceptar_oferta/5, candidato_a_desalojar/1, desalojar/3]).
+-export([guardar/7, registrar_local/4, aceptar_oferta/5, candidato_a_desalojar/1, desalojar/3]).
 
 -type entry() :: {integer(), {value, term(), integer() | infinity}}.
 -type valores() :: #{term() => entry()}.
 -type metadatos() :: #{term() => {integer(), valor | borrado | desalojado}}.
 
-%% ---------------------------------------------------------------------
-%% Politica de desalojo (4.7)
-%%
-%% Se llama DESPUES de insertar un valor (put local o replica recibida).
-%%  1. Si hay a lo sumo Alfa valores, no hace nada.
-%%  2. Si hay mas de Alfa, primero retira los vencidos: no sirven para
-%%     nada y sacarlos no pierde ningun dato valido.
-%%  3. Si sigue habiendo mas de Alfa, desaloja el valor de MENOR version
-%%     (el escrito hace mas tiempo). Antes de descartarlo lo ofrece a las
-%%     demas replicas.
-%%
-%% Por que se conserva el 75 % mas reciente: las versiones salen de
-%% erlang:unique_integer([monotonic]), que siempre crece. Como se inserta
-%% de a un valor, cuando hay que desalojar hay Alfa + 1 valores y sale
-%% solo el de menor version. Los Alfa mas recientes siguen disponibles,
-%% que es mas que el 75 % pedido.
-%% ---------------------------------------------------------------------
--spec hacer_lugar([pid()], pos_integer(), valores(), metadatos()) ->
-    {valores(), metadatos()}.
-hacer_lugar(Peers, Alfa, Map, Metadatos) ->
-    case map_size(Map) > Alfa of
-        false ->
-            {Map, Metadatos};
+%% Protegemos ceil(3*Alfa/4) claves escritas localmente. Solo se guardan
+%% claves y versiones; ninguna copia adicional de sus valores.
+registrar_local(Key, {Version, _}, Alfa, Locales) ->
+    ConNueva = maps:put(Key, Version, Locales),
+    Cupo = (3 * Alfa + 3) div 4,
+    case map_size(ConNueva) > Cupo of
+        false -> ConNueva;
         true ->
-            {MapLimpio, MetadatosLimpios} = limpiar_vencidos(Map, Metadatos),
-            desalojar_hasta(Peers, Alfa, MapLimpio, MetadatosLimpios)
+            [{_, Vieja} | _] = lists:sort([{V, K} || {K, V} <- maps:to_list(ConNueva)]),
+            maps:remove(Vieja, ConNueva)
     end.
 
-%% Desaloja de a un valor mientras se supere Alfa.
--spec desalojar_hasta([pid()], pos_integer(), valores(), metadatos()) ->
-    {valores(), metadatos()}.
-desalojar_hasta(Peers, Alfa, Map, Metadatos) ->
-    case map_size(Map) > Alfa of
+%% Reserva lugar ANTES de insertar. Nunca construye un mapa de Alfa+1 valores.
+%% Una replica remota puede perder el valor entrante si todos los residentes
+%% estan protegidos; conserva su version y ofrece el dato a los pares.
+guardar(Peers, Alfa, Key, {Version, {value, _, Vence}} = Entry, Map, Metadatos, Locales) ->
+    case simple_kv_ttl:vigente(Vence) of
         false ->
-            {Map, Metadatos};
+            Borrado = {Version, borrado},
+            {simple_kv_almacen:aplicar_actualizacion(Key, Borrado, Map, Metadatos),
+             simple_kv_almacen:registrar_metadata(Key, Borrado, Metadatos)};
+        true -> guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos, Locales)
+    end.
+
+guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos, Locales) ->
+    {Limpio, Meta} = limpiar_vencidos(Map, Metadatos),
+    case maps:is_key(Key, Limpio) orelse map_size(Limpio) < Alfa of
+        true -> aplicar(Key, Entry, Limpio, Meta);
+        false ->
+            %% Si la entrada es una escritura local protegida, debe entrar.
+            {Version, _} = Entry,
+            Protegida = maps:get(Key, Locales, sin_version) =:= Version,
+            Candidato = candidato_no_protegido(Limpio, Locales),
+            case Candidato of
+                ninguno -> rechazar(Peers, Key, Entry, Limpio, Meta);
+                {OtraKey, {OtraVersion, _} = OtraEntry} ->
+                    case Protegida orelse Version > OtraVersion of
+                        true ->
+                            simple_kv_replicacion:ofrecer(Peers, OtraKey, OtraEntry),
+                            {Reducido, NuevaMeta} = desalojar(OtraKey, Limpio, Meta),
+                            aplicar(Key, Entry, Reducido, NuevaMeta);
+                        false -> rechazar(Peers, Key, Entry, Limpio, Meta)
+                    end
+            end
+    end.
+
+%% Solo acumula clave/version, sin construir otro mapa de valores.
+candidato_no_protegido(Map, Locales) ->
+    Mejor = maps:fold(fun(K, {V, _}, Acc) ->
+        case maps:get(K, Locales, sin_version) =:= V of
+            true -> Acc;
+            false ->
+                case Acc of
+                    ninguno -> {K, V};
+                    {_, Anterior} when V < Anterior -> {K, V};
+                    _ -> Acc
+                end
+        end
+    end, ninguno, Map),
+    case Mejor of
+        ninguno -> ninguno;
+        {Key, _} -> {Key, maps:get(Key, Map)}
+    end.
+
+aplicar(Key, {Version, {value, _, Vence}} = Entry, Map, Meta) ->
+    Aplicada = case simple_kv_ttl:vigente(Vence) of
+        true -> Entry;
+        false -> {Version, borrado}
+    end,
+    {simple_kv_almacen:aplicar_actualizacion(Key, Aplicada, Map, Meta),
+     simple_kv_almacen:registrar_metadata(Key, Aplicada, Meta)}.
+
+rechazar(Peers, Key, {Version, {value, _, Vence}} = Entry, Map, Meta) ->
+    case simple_kv_ttl:vigente(Vence) of
         true ->
-            {Key, Entry} = candidato_a_desalojar(Map),
             simple_kv_replicacion:ofrecer(Peers, Key, Entry),
-            {NuevoMap, NuevosMetadatos} = desalojar(Key, Map, Metadatos),
-            desalojar_hasta(Peers, Alfa, NuevoMap, NuevosMetadatos)
+            {Map, maps:put(Key, {Version, desalojado}, Meta)};
+        false -> {Map, maps:put(Key, {Version, borrado}, Meta)}
     end.
 
 %% ---------------------------------------------------------------------
