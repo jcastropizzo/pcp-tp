@@ -101,12 +101,10 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes) ->
                         false ->
                             loop(Peers, Alfa, Map, Metadatos, Pendientes);
                         true ->
-                            %% El cliente acumula el candidato; Pendientes no guarda valores.
                             Client ! {Ref, candidato, Resultado},
                             Restantes = lists:delete(Peer, Faltan),
                             case Restantes of
                                 [] ->
-                                    %% Comparar tambien con el estado local actualizado durante la espera.
                                     Client ! {Ref, candidato,
                                         simple_kv_almacen:buscar_local(Key, Map, Metadatos)},
                                     Client ! {Ref, fin},

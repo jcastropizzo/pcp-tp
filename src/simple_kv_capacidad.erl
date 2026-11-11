@@ -50,7 +50,6 @@ elegir_descarte(Key, {Version, _} = Entry, Alfa, Map) ->
             {K, EntradaDe(K)}
     end.
 
-%% Mapa y metadatos se actualizan juntos para mantener coherencia de version.
 aplicar(Key, Entry, Map, Meta) ->
     {simple_kv_almacen:aplicar_actualizacion(Key, Entry, Map, Meta),
      simple_kv_almacen:registrar_metadata(Key, Entry, Meta)}.
@@ -60,7 +59,6 @@ rechazar(Peers, Key, {Version, _} = Entry, Map, Meta) ->
     ofrecer_si_vigente(Peers, Key, Entry),
     {Map, maps:put(Key, {Version, desalojado}, Meta)}.
 
-%% Un vencido no sirve a los pares; un vigente se ofrece antes del descarte.
 ofrecer_si_vigente(Peers, Key, {_, {value, _, Vence}} = Entry) ->
     case simple_kv_ttl:vigente(Vence) of
         true -> simple_kv_replicacion:ofrecer(Peers, Key, Entry);
@@ -105,7 +103,6 @@ candidato_a_desalojar(Valores) when is_map(Valores) ->
         Valores
     ).
 
-%% Conserva la version desalojada para distinguir ausencia local de delete.
 -spec desalojar(term(), valores(), metadatos()) -> {valores(), metadatos()}.
 desalojar(Key, Map, Metadatos) ->
     {ok, {Version, _}} = maps:find(Key, Map),
