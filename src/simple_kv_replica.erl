@@ -4,18 +4,17 @@
 %% Estado de la replica (solo en los argumentos de loop):
 %%   Peers      : pids de las otras replicas
 %%   Alfa       : capacidad maxima de valores (4.7)
-%%   Locales    : Key => Version, ultimas ceil(3*Alfa/4) escrituras locales (sin valores)
 %%   Map        : Key => {Version, {value, Val, Vence}}      (solo valores)
 %%   Metadatos  : Key => {Version, valor | borrado | desalojado}
 %%   Pendientes : ConsultaRef => {Client, Ref, Key, Faltan}  (gets en curso, 4.8)
 
 init() ->
     receive
-        {peers, Peers, Alfa} -> loop(Peers, Alfa, #{}, #{}, #{}, #{});
+        {peers, Peers, Alfa} -> loop(Peers, Alfa, #{}, #{}, #{});
         _ -> init()
     end.
 
-loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales) ->
+loop(Peers, Alfa, Map, Metadatos, Pendientes) ->
     receive
         %% ---------- otra replica pregunta por una clave (4.8) ----------
         %% Se responde enseguida con lo local: nunca se espera a nadie (5.2).
@@ -23,23 +22,22 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales) ->
             Solicitante !
                 {respuesta_consulta, ConsultaRef, self(),
                  simple_kv_almacen:buscar_local(Key, Map, Metadatos)},
-            loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales);
+            loop(Peers, Alfa, Map, Metadatos, Pendientes);
 
         stop ->
             ok;
 
         %% ---------- put del cliente ----------
-        %% Reserva lugar antes de insertar; protege las escrituras locales recientes.
+        %% Reserva lugar antes de insertar; conserva las versiones mas recientes sin distinguir origen.
         %% Sobrescribir una clave existente no aumenta el tamano.
         {put, Client, Ref, Key, Val, Time} ->
             Entry = {simple_kv_replicacion:nueva_version(),
                      {value, Val, simple_kv_ttl:expira(Time)}},
-            NuevosLocales = simple_kv_capacidad:registrar_local(Key, Entry, Alfa, Locales),
             {NewMap, NuevosMetadatos} = simple_kv_capacidad:guardar(
-                Peers, Alfa, Key, Entry, Map, Metadatos, NuevosLocales),
+                Peers, Alfa, Key, Entry, Map, Metadatos),
             Client ! {Ref, ok},
             simple_kv_replicacion:replicar(Peers, Key, Entry),
-            loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes, NuevosLocales);
+            loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes);
         %% ---------- delete del cliente (tombstone) ----------
         {delete, Client, Ref, Key} ->
             Entry = {simple_kv_replicacion:nueva_version(), borrado},
@@ -47,7 +45,7 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales) ->
             NewMap = maps:remove(Key, Map),
             Client ! {Ref, ok},
             simple_kv_replicacion:replicar(Peers, Key, Entry),
-            loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes, Locales);
+            loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes);
 
         %% ---------- get del cliente ----------
         {get, Client, Ref, Key} ->
@@ -56,21 +54,21 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales) ->
                 %% tengo el valor: respondo (la API del cliente chequea el TTL)
                 {ok, {_Version, {value, _Val, _Vence}}} ->
                     responder_lectura(Client, Ref, Local),
-                    loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales);
+                    loop(Peers, Alfa, Map, Metadatos, Pendientes);
                 %% fue borrado: not_found
                 {ok, {_Version, borrado}} ->
                     responder_lectura(Client, Ref, Local),
-                    loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales);
+                    loop(Peers, Alfa, Map, Metadatos, Pendientes);
                 %% desalojado o desconocido, y no hay a quien preguntar
                 _ when Peers =:= [] ->
                     responder_lectura(Client, Ref, Local),
-                    loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales);
+                    loop(Peers, Alfa, Map, Metadatos, Pendientes);
                 %% desalojado o desconocido: pregunto a los pares (4.8)
                 %% y sigo atendiendo mensajes sin bloquearme (5.2)
                 _ ->
                     NuevosPendientes =
                         consultar_pares(Peers, Client, Ref, Key, Local, Pendientes),
-                    loop(Peers, Alfa, Map, Metadatos, NuevosPendientes, Locales)
+                    loop(Peers, Alfa, Map, Metadatos, NuevosPendientes)
             end;
         %% ---------- cambio que llega de otra replica ----------
         {replica, Key, Entry} ->
@@ -83,25 +81,25 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales) ->
                                  simple_kv_almacen:registrar_metadata(Key, Entry, Metadatos)};
                             {_, {value, _, _}} ->
                                 simple_kv_capacidad:guardar(
-                                    Peers, Alfa, Key, Entry, Map, Metadatos, Locales)
+                                    Peers, Alfa, Key, Entry, Map, Metadatos)
                         end;
                     false -> {Map, Metadatos}
                 end,
-            loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes, Locales);
+            loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes);
 
         %% ---------- otra replica me ofrece un valor que va a desalojar ----------
         %% Nunca desaloja ni envia mensajes: la cadena termina aca.
         {ofrecer, Key, Entry} ->
             {NewMap, NuevosMetadatos} =
                 simple_kv_capacidad:aceptar_oferta(Key, Entry, Alfa, Map, Metadatos),
-            loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes, Locales);
+            loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes);
         %% ---------- respuesta a una consulta mia (4.8) ----------
         {respuesta_consulta, ConsultaRef, Peer, Resultado} ->
             case maps:find(ConsultaRef, Pendientes) of
                 {ok, {Client, Ref, Key, Faltan}} ->
                     case lists:member(Peer, Faltan) of
                         false ->
-                            loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales);
+                            loop(Peers, Alfa, Map, Metadatos, Pendientes);
                         true ->
                             Client ! {Ref, candidato, Resultado},
                             Restantes = lists:delete(Peer, Faltan),
@@ -111,20 +109,20 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales) ->
                                         simple_kv_almacen:buscar_local(Key, Map, Metadatos)},
                                     Client ! {Ref, fin},
                                     loop(Peers, Alfa, Map, Metadatos,
-                                         maps:remove(ConsultaRef, Pendientes), Locales);
+                                         maps:remove(ConsultaRef, Pendientes));
                                 _ ->
                                     Actualizado = {Client, Ref, Key, Restantes},
                                     loop(Peers, Alfa, Map, Metadatos,
-                                         maps:put(ConsultaRef, Actualizado, Pendientes), Locales)
+                                         maps:put(ConsultaRef, Actualizado, Pendientes))
                             end
                     end;
                 error ->
-                    loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales)
+                    loop(Peers, Alfa, Map, Metadatos, Pendientes)
             end;
 
         %% ---------- descartar mensajes inesperados (5.1) ----------
         _ ->
-            loop(Peers, Alfa, Map, Metadatos, Pendientes, Locales)
+            loop(Peers, Alfa, Map, Metadatos, Pendientes)
     end.
 
 %% Manda {consultar, ...} a todos los pares y registra el get pendiente.

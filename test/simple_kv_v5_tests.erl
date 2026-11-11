@@ -52,65 +52,80 @@ init_descarta_mensajes_test() ->
         ?assertEqual({messages, []}, process_info(P, messages))
     after simple_kv:stop([P]) end.
 
-%% La capacidad y el cupo redondeado hacia arriba se verifican en cada paso,
-%% incluyendo Alfa=3 y Alfa no multiplo de cuatro. Solo metadatos en Locales.
-limite_y_cupo_local_para_varios_alfa_test() ->
+%% La misma seleccion global para Alfa de 3 a 16 y tres ordenes distintos.
+limite_y_mayores_versiones_para_varios_alfa_test() ->
     lists:foreach(fun(Alfa) ->
-        Q = (3 * Alfa + 3) div 4,
-        {Map, Meta, Locales} = lists:foldl(fun(N, {M, T, L}) ->
-            E = {N, {value, {local, N}, infinity}},
-            NL = simple_kv_capacidad:registrar_local(N, E, Alfa, L),
-            {NM, NT} = simple_kv_capacidad:guardar([], Alfa, N, E, M, T, NL),
-            ?assert(map_size(NM) =< Alfa),
-            {NM, NT, NL}
-        end, {#{}, #{}, #{}}, lists:seq(1, 30)),
-        {Final, _} = lists:foldl(fun(N, {M, T}) ->
-            E = {N, {value, remoto, infinity}},
-            {NM, NT} = simple_kv_capacidad:guardar([], Alfa, N, E, M, T, Locales),
-            ?assert(map_size(NM) =< Alfa),
-            {NM, NT}
-        end, {Map, Meta}, lists:seq(100, 150)),
-        ?assertEqual(Q, map_size(Locales)),
-        lists:foreach(fun(N) -> ?assert(maps:is_key(N, Final)) end,
-                      lists:seq(31-Q, 30))
-    end, lists:seq(3, 16)).
+        Entradas = [{N,{N,{value,N,infinity}}} || N <- lists:seq(1,40)],
+        Esperado = maps:from_list(lists:nthtail(40-Alfa,Entradas)),
+        lists:foreach(fun(Orden) ->
+            {Map,_} = lists:foldl(fun({K,E},{M,T}) ->
+                {NM,NT}=simple_kv_capacidad:guardar([],Alfa,K,E,M,T),
+                ?assert(map_size(NM)=<Alfa), {NM,NT}
+            end,{#{},#{}},Orden),
+            ?assertEqual(Esperado,Map)
+        end,[Entradas,lists:reverse(Entradas),
+            [E || E={N,_} <- Entradas,N rem 2=:=0] ++
+            [E || E={N,_} <- Entradas,N rem 2=:=1]])
+    end,lists:seq(3,16)).
 
-%% Dos escritores reales compiten por espacio. Los ultimos Q valores propios
-%% siguen disponibles desde el nodo de origen, tambien luego de converger.
-escrituras_locales_concurrentes_conservan_cupo_test() ->
-    {ok, [P1, P2] = Ps} = simple_kv:start_link(2, 4),
-    Parent = self(),
-    Workers = [spawn_monitor(fun() ->
-        lists:foreach(fun(N) -> ok = simple_kv:put(P, {Tag, N}, N) end, lists:seq(1, 20)),
-        Parent ! {terminado, self()}
-    end) || {P, Tag} <- [{P1, a}, {P2, b}]],
+%% Compara valores LOCALES: get/2 podria ocultar divergencia leyendo un par.
+escritores_concurrentes_convergen_al_mismo_map_test() ->
+    Alfa=4,
+    {ok,Ps}=simple_kv:start_link(3,Alfa),
+    Parent=self(), Trabajos=lists:zip(Ps,[a,b,c]),
+    Keys=[{Tag,N} || {_,Tag} <- Trabajos,N <- lists:seq(1,20)],
+    Ws=[spawn_monitor(fun() ->
+        lists:foreach(fun(N)->ok=simple_kv:put(P,{Tag,N},N) end,lists:seq(1,20)),
+        Parent ! {terminado,self()}
+    end) || {P,Tag} <- Trabajos],
     try
-        lists:foreach(fun({W, M}) ->
-            receive {terminado, W} -> ok after 2000 -> erlang:error(escritor_lento) end,
-            receive {'DOWN', M, process, W, normal} -> ok end
-        end, Workers),
-        lists:foreach(fun({P, Tag}) ->
-            lists:foreach(fun(N) ->
-                ?assertEqual({ok, N}, simple_kv:get(P, {Tag, N}))
-            end, [18,19,20])
-        end, [{P1,a},{P2,b}])
+        lists:foreach(fun({W,M})->
+            receive {terminado,W}->ok after 2000->error(escritor_lento) end,
+            receive {'DOWN',M,process,W,normal}->ok end
+        end,Ws),
+        Plazo=erlang:monotonic_time(millisecond)+1500,
+        Esperado=esperar_maps_iguales(Ps,Keys,Alfa,Plazo),
+        ?assertEqual(Alfa,map_size(Esperado))
     after simple_kv:stop(Ps) end.
 
 sobrescritura_delete_ttl_y_trafico_remoto_test() ->
-    {ok, [P]} = simple_kv:start_link(1, 4),
+    {ok,[P]}=simple_kv:start_link(1,4),
     try
-        lists:foreach(fun(N) -> simple_kv:put(P, N, N) end, lists:seq(1, 4)),
-        ok = simple_kv:put(P, 2, nuevo),
-        ok = simple_kv:delete(P, 3),
-        ok = simple_kv:put(P, 4, vencido, 0),
-        %% Versiones globales reales, posteriores a las escrituras locales.
-        lists:foreach(fun(N) ->
-            P ! {replica, {remoto,N}, {simple_kv_replicacion:nueva_version(), {value,N,infinity}}}
-        end, lists:seq(1, 10)),
-        ?assertEqual({ok,nuevo}, simple_kv:get(P, 2)),
-        ?assertEqual(not_found, simple_kv:get(P, 3)),
-        ?assertEqual(not_found, simple_kv:get(P, 4))
+        lists:foreach(fun(N)->simple_kv:put(P,N,N) end,lists:seq(1,4)),
+        ok=simple_kv:put(P,2,nuevo),
+        ok=simple_kv:delete(P,3),
+        ok=simple_kv:put(P,4,vencido,0),
+        ?assertEqual({ok,nuevo},simple_kv:get(P,2)),
+        lists:foreach(fun(N)->
+            P ! {replica,{remoto,N},{simple_kv_replicacion:nueva_version(),{value,N,infinity}}}
+        end,lists:seq(1,10)),
+        ?assertEqual(not_found,simple_kv:get(P,2)),
+        ?assertEqual(not_found,simple_kv:get(P,3)),
+        ?assertEqual(not_found,simple_kv:get(P,4)),
+        lists:foreach(fun(N)->?assertEqual({ok,N},simple_kv:get(P,{remoto,N})) end,[7,8,9,10])
     after simple_kv:stop([P]) end.
+
+map_local(P,Keys) ->
+    lists:foldl(fun(K,Acc)->
+        R=make_ref(), P ! {consultar,self(),R,K},
+        receive
+            {respuesta_consulta,R,P,{ok,{_,{value,_,_}}=E}}->maps:put(K,E,Acc);
+            {respuesta_consulta,R,P,_}->Acc
+        after 1000->error(sin_respuesta_local)
+        end
+    end,#{},Keys).
+
+esperar_maps_iguales(Ps,Keys,Alfa,Plazo) ->
+    Maps=[map_local(P,Keys) || P <- Ps],
+    case lists:usort(Maps) of
+        [Unico] when map_size(Unico)=:=Alfa->Unico;
+        _ ->
+            case erlang:monotonic_time(millisecond)>=Plazo of
+                true->error({maps_no_convergen,Maps});
+                false->receive after 5->ok end,
+                       esperar_maps_iguales(Ps,Keys,Alfa,Plazo)
+            end
+    end.
 
 %% No se acumula el valor en Pendientes: se entrega al cliente antes de que
 %% responda el ultimo par. Las respuestas ajenas/duplicadas no cierran el get.
@@ -172,3 +187,25 @@ delete_replicado_viejo_conserva_valor_nuevo_test() ->
         P ! {replica, k, {10,borrado}},
         ?assertEqual({ok,nuevo},simple_kv:get(P,k))
     after simple_kv:stop([P]) end.
+
+%% Reproduce la divergencia causada por el cupo local: ahora todas las claves
+%% locales antiguas salen frente a Alfa versiones remotas mas nuevas.
+versiones_remotas_desplazan_todas_las_locales_antiguas_test() ->
+    {ok,[P]}=simple_kv:start_link(1,3),
+    try
+        lists:foreach(fun(K)->simple_kv:put(P,K,K) end,[a,b,c]),
+        Remotas=[{K,{simple_kv_replicacion:nueva_version(),{value,K,infinity}}} || K <- [d,e,f]],
+        lists:foreach(fun({K,E})->P ! {replica,K,E} end,Remotas),
+        ?assertEqual(maps:from_list(Remotas),map_local(P,[a,b,c,d,e,f]))
+    after simple_kv:stop([P]) end.
+
+mismas_entradas_en_ordenes_opuestos_producen_maps_iguales_test() ->
+    {ok,[P1,P2]=Ps}=simple_kv:start_link(2,3),
+    Entradas=[{K,{N,{value,K,infinity}}} || {K,N} <- lists:zip([a,b,c,d,e,f],lists:seq(1,6))],
+    try
+        lists:foreach(fun({K,E})->P1 ! {replica,K,E} end,Entradas),
+        lists:foreach(fun({K,E})->P2 ! {replica,K,E} end,lists:reverse(Entradas)),
+        Esperado=maps:from_list(lists:nthtail(3,Entradas)),
+        ?assertEqual(Esperado,map_local(P1,[a,b,c,d,e,f])),
+        ?assertEqual(Esperado,map_local(P2,[a,b,c,d,e,f]))
+    after simple_kv:stop(Ps) end.

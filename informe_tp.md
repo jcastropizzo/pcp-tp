@@ -13,7 +13,6 @@ Cada réplica mantiene exclusivamente en argumentos de su ciclo:
 - `Peers`: identificadores de las otras réplicas; `Alfa`: capacidad máxima.
 - `Map`: `Key => {Version, {value, Val, Vence}}`. Es el único almacenamiento de valores de la réplica; contiene como máximo Alfa entradas.
 - `Metadatos`: `Key => {Version, valor | borrado | desalojado}`. Conserva versión incluso sin valor: un desalojo es local, un borrado invalida el dato.
-- `Locales`: claves y versiones de las últimas Q claves distintas escritas localmente, con Q = ceil(3·Alfa/4). No contiene valores y tiene como máximo Q entradas.
 - `Pendientes`: `ConsultaRef => {Client, Ref, Key, Faltan}`. Registra lecturas remotas; no almacena resultados ni valores.
 
 Los metadatos pueden crecer con la cantidad de claves conocidas. No se recolectan lápidas: quitarlas sin demostrar que ya no quedan mensajes antiguos permitiría resurrecciones. La cota Alfa corresponde a valores, no a claves o versiones de metadatos.
@@ -64,37 +63,39 @@ Desalojar conserva `{Version, desalojado}`. Esta marca no significa que el dato 
 
 La limpieza de un valor vencido conserva su versión como borrado. No crea una escritura nueva. Una copia de igual versión tiene el mismo vencimiento absoluto y tampoco es visible después de ese instante, aun si aún conserva físicamente el valor.
 
-### Convergencia y capacidad
+### Convergencia y capacidad: alcance de la garantía
 
-Una vez detenidas las escrituras, todas sus replicaciones se procesan y las ofertas también terminan. La versión máxima de cada clave llega a todos los nodos, incluso si alguno debe descartarla por capacidad: conserva la versión con estado desalojado. No reaparecen versiones anteriores ni se inventan versiones al ofrecer.
+El criterio exigido es igualdad de los mapas de valores al cesar las escrituras y procesarse los mensajes. Acuerdo en versiones con distintas copias físicas no se considera suficiente. La política selecciona las Alfa versiones mayores, sin proteger por origen local.
 
-Con capacidad finita, igualdad lógica de versiones y resolución de conflictos no exige que todos guarden físicamente los mismos valores: las copias se pueden desalojar de manera distinta y los metadatos distinguen esa ausencia local de un borrado. Las lecturas consultan los pares para encontrar una copia válida. Si todos pierden una clave por saturación, no existe un valor para devolver; la V5 admite esa pérdida en el peor caso.
+Para puts de claves distintas con TTL infinito, cada recepción retiene el máximo conjunto de hasta Alfa entradas por versión entre las ya vistas. Incorporar una nueva entrada y quitar el mínimo equivale a calcular top-Alfa. Esta operación es independiente del orden y de duplicados; después de recibir el mismo conjunto, los mapas son iguales. Una versión menor para una clave ya actualizada no reemplaza la mayor.
 
-Esta interpretación compatibiliza consistencia eventual con desalojo local y protección del 75 % local: para una clave conservada, las copias vigentes resuelven el mismo ganador; una ausencia por desalojo nunca se usa como una escritura que invalide otras copias.
+No se extiende esta demostración automáticamente a borrados, sobrescrituras ni vencimientos: descartar una copia y luego eliminar otra clave puede dejar una vacante sin recuperar la anterior. Caso comprobado con Alfa=3: a1,b2,c3,d4,delete(d)5 produce b,c; delete(d)5,a1,b2,c3,d4 produce a,b,c. La versión d4 se ignora en el segundo orden por la lápida d5. Todos recibieron las mismas operaciones, pero los mapas difieren.
+
+Falta resolver recuperación/reconciliación de copias y limpieza de TTL para cerrar igualdad física final. La V5 permite pérdida por saturación, pero eso no demuestra igualdad de los conjuntos restantes. El documento registra este límite; los tests aprobados no certifican convergencia integral.
 
 ---
 
-## 4. Capacidad, protección local y ofertas
+## 4. Capacidad y selección por versión
 
-Se adopta Q = ceil(3·Alfa/4), redondeando hacia arriba para conservar al menos el 75 %. La recencia se mide por versión de escritura, sobre claves distintas escritas en ese nodo; una sobrescritura renueva la posición de su clave. Los borrados, vencimientos o reemplazos por una versión más nueva invalidan la obligación de devolver el valor anterior.
+La réplica reserva lugar antes de insertar. Primero retira vencidos. Si la clave ya está o queda una vacante, aplica la escritura aceptable. Si está llena, compara la versión entrante con la menor versión de todo el mapa. Si es mayor, ofrece y desaloja esa entrada antes de guardar; si es menor, ofrece y descarta el propio valor recibido, conservando versión y marca de desalojo.
 
-`Locales` guarda las últimas Q claves distintas y sus versiones locales. Al registrar una escritura se actualiza su clave; si hay Q+1, se elimina la de menor versión. Mantener allí una referencia a una versión ya borrada o reemplazada no conserva su valor ni protege versiones distintas de esa misma clave.
+La regla no distingue put local de replicación remota. No existe estado Locales ni cupo local protegido. Un put local genera la versión más alta de la VM y entra; una replicación atrasada puede perder frente a todas las residentes. La selección no depende del orden de las claves ni del TTL relativo: el TTL solo determina vigencia.
 
-Para guardar un valor vigente se limpian vencidos. Si su clave ya está o queda espacio, se aplica la actualización. En caso contrario se elige la versión menor entre las entradas no protegidas. Una entrada está protegida solo si su clave y versión coinciden exactamente con Locales.
+### Cota de almacenamiento
 
-Una escritura local protegida entra desalojando una elegible. Para una entrada remota no protegida se compara también su versión: si es más vieja que las elegibles, o todos los residentes están protegidos, se descarta la propia entrada recibida. Antes se ofrece y se conserva su versión como desalojado. Una recepción remota no puede desplazar los valores locales protegidos de otras claves.
+El estado inicial tiene cero valores. Cada inserción reemplaza una clave existente, usa una vacante o retira una entrada antes de agregar otra. Nunca se construye un mapa con Alfa+1 entradas. Deletes y limpieza reducen tamaño; una oferta solo entra con espacio o reemplazo. Por inducción, todos los estados de almacenamiento respetan Alfa.
 
-### Argumento de la cota y de la protección
+La selección mantiene las Alfa versiones mayores entre los candidatos recibidos y disponibles en el escenario de inserciones sin invalidaciones. No puede reconstruir una copia descartada cuando posteriormente queda espacio: ese es el pendiente de reconciliación expuesto en la sección 3.
 
-El estado inicial tiene cero valores. Cada transición que inserta reemplaza una clave existente, usa una vacante o elimina una entrada antes de insertar. Nunca se construye un mapa con Alfa+1 entradas. Deletes y limpieza solo reducen tamaño. Una oferta solo entra con vacante o reemplazo. Por inducción, todos los estados de almacenamiento respetan la cota Alfa.
+### Ofertas y terminación
 
-Una escritura local nueva está entre las Q protegidas. Si el mapa está lleno y su clave no está, como máximo Q-1 residentes están protegidos: la clave entrante ocupa una posición de ese cupo. Como Q ≤ Alfa, hay al menos un residente elegible, incluso para Alfa=3. Por eso la nueva escritura entra sin quitar otra protegida. Una recepción remota de otra clave tampoco las desaloja. Los valores de esas últimas Q escrituras distintas permanecen disponibles mientras sigan vigentes y no sean reemplazados/borrados.
+Antes de descartar un valor vigente se lo ofrece a todos los pares. Una oferta se acepta si está vigente, no hay una versión posterior y hay espacio o reemplaza una clave existente. Procesarla no provoca desalojos ni reenvíos; por eso no desencadena una cadena de mensajes. Las replicaciones no se vuelven a replicar. Para un número finito de escrituras hay un número finito de ofertas.
 
-### Oportunidad de conservación y terminación
+Una oferta no funciona como reconciliación completa: un nodo lleno puede rechazarla y quedar con espacio después. No se afirma que las ofertas por sí solas cierren el pendiente de convergencia.
 
-Antes de descartar un vigente se envía ofrecer a todos los pares. Un receptor acepta únicamente si está vigente, la versión es aceptable y hay lugar o reemplaza una clave existente. Puede limpiar vencidos, pero nunca desaloja para aceptar ni emite otros mensajes. Por tanto una oferta no produce nuevas ofertas.
+### Requisito del 75 % local
 
-Un put o una replicación puede causar como máximo un descarte y una oferta por par. Recibir una replicación no la vuelve a propagar. Para un número finito de escrituras hay un número finito de estos mensajes. La pérdida es posible si ningún receptor puede conservar el valor, y no genera una cadena infinita ni espera circular.
+Se adopta selección global por mayor versión para buscar mapas iguales. La redacción del 75 % local requiere aclaración frente a ese objetivo: con Alfa=3, dos nodos que escribieron tres claves distintas cada uno no pueden conservar sus seis claves en un mapa común de tres entradas. No se garantiza protección independiente de las últimas escrituras locales frente a todas las remotas. Esa interpretación queda explícitamente pendiente, en vez de introducir una excepción que rompe la igualdad final.
 
 ---
 
@@ -106,7 +107,7 @@ Cada par contesta inmediatamente con lo que conoce, sin consultar a otros. La r�
 
 La reducción por versión ocurre en la función pública get/2, en el proceso cliente, no en la réplica. El cliente mantiene el mejor resultado hasta fin y comprueba su vencimiento justo antes de retornar `{ok, Val}` o `not_found`. Pendientes solo conserva claves, referencias e identificadores: los resultados remotos no constituyen una caché ni almacenamiento secundario de valores del nodo. Los mensajes en tránsito son parte del protocolo; no se guardan en otra estructura de la réplica.
 
-No hay lectura con garantía de instantánea o linealizabilidad entre escrituras concurrentes; se usa la mejor información recibida y una comprobación local final. Cuando cesan las escrituras y llega la propagación, rige el criterio eventual descrito anteriormente.
+No hay lectura con garantía de instantánea o linealizabilidad entre escrituras concurrentes; se usa la mejor información recibida y una comprobación local final. Cuando cesan las escrituras y llega la propagación, la igualdad final de mapas solo se considera justificada en el alcance indicado en la sección 3.
 
 ### Ausencia de deadlock
 
@@ -116,6 +117,6 @@ La réplica que consulta vuelve al ciclo normal: puede atender puts, deletes, of
 
 `rebar3 compile` y `rebar3 eunit` compilan con `warn_all` y `warnings_as_errors`. También se puede compilar directamente con `erlc +warn_all -Werror`. Los tests cubren API y validaciones, enlaces, términos compuestos, TTL y reemplazos, propagación, conflictos desordenados/concurrentes, borrados sin resurrección, capacidad receptora, selector, ofertas y lecturas remotas.
 
-Las regresiones V5 cubren el cupo local para Alfa de 3 a 16, tráfico remoto y escritores locales concurrentes, TTL cero con capacidad llena, cierre demorado más de un segundo, descarte durante inicialización, respuestas duplicadas/ajenas y vencimiento de un candidato mientras falta otro par. Se combinan pruebas por API pública con pruebas internas del protocolo para forzar órdenes concretos; las internas complementan, no sustituyen, el comportamiento observable.
+Las regresiones V5 cubren el límite y las mayores versiones para Alfa de 3 a 16, órdenes opuestos, tráfico remoto y mapas locales iguales con escritores concurrentes, TTL cero con capacidad llena, cierre demorado más de un segundo, descarte durante inicialización, respuestas duplicadas/ajenas y vencimiento de un candidato mientras falta otro par. Se combinan pruebas por API pública con pruebas internas del protocolo para forzar órdenes concretos; las internas complementan, no sustituyen, el comportamiento observable.
 
-Las pruebas finitas no demuestran todos los intercalados. La cota, protección local, elección de versiones y terminación se justifican por las invariantes anteriores. La verificación administrativa y el push al repositorio asignado por la cátedra corresponden a los integrantes; el repositorio privado de trabajo no constituye por sí solo la entrega.
+Las pruebas finitas no demuestran todos los intercalados. La cota, elección de versiones y terminación se justifican por las invariantes anteriores; el cierre integral de convergencia sigue pendiente. La verificación administrativa y el push al repositorio asignado por la cátedra corresponden a los integrantes; el repositorio privado de trabajo no constituye por sí solo la entrega.

@@ -1,47 +1,32 @@
 -module(simple_kv_capacidad).
--export([guardar/7, registrar_local/4, aceptar_oferta/5, candidato_a_desalojar/1, desalojar/3]).
+-export([guardar/6, aceptar_oferta/5, candidato_a_desalojar/1, desalojar/3]).
 
 -type entry() :: {integer(), {value, term(), integer() | infinity}}.
 -type valores() :: #{term() => entry()}.
 -type metadatos() :: #{term() => {integer(), valor | borrado | desalojado}}.
 
-%% Protegemos ceil(3*Alfa/4) claves escritas localmente. Solo se guardan
-%% claves y versiones; ninguna copia adicional de sus valores.
-registrar_local(Key, {Version, _}, Alfa, Locales) ->
-    ConNueva = maps:put(Key, Version, Locales),
-    Cupo = (3 * Alfa + 3) div 4,
-    case map_size(ConNueva) > Cupo of
-        false -> ConNueva;
-        true ->
-            [{_, Vieja} | _] = lists:sort([{V, K} || {K, V} <- maps:to_list(ConNueva)]),
-            maps:remove(Vieja, ConNueva)
-    end.
-
-%% Reserva lugar ANTES de insertar. Nunca construye un mapa de Alfa+1 valores.
-%% Una replica remota puede perder el valor entrante si todos los residentes
-%% estan protegidos; conserva su version y ofrece el dato a los pares.
-guardar(Peers, Alfa, Key, {Version, {value, _, Vence}} = Entry, Map, Metadatos, Locales) ->
+%% Conserva las Alfa entradas de mayor version, sin distinguir origen.
+%% Reserva lugar antes de insertar, sin construir un mapa de Alfa+1 valores.
+guardar(Peers, Alfa, Key, {Version, {value, _, Vence}} = Entry, Map, Metadatos) ->
     case simple_kv_ttl:vigente(Vence) of
         false ->
             Borrado = {Version, borrado},
             {simple_kv_almacen:aplicar_actualizacion(Key, Borrado, Map, Metadatos),
              simple_kv_almacen:registrar_metadata(Key, Borrado, Metadatos)};
-        true -> guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos, Locales)
+        true -> guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos)
     end.
 
-guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos, Locales) ->
+guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos) ->
     {Limpio, Meta} = limpiar_vencidos(Map, Metadatos),
     case maps:is_key(Key, Limpio) orelse map_size(Limpio) < Alfa of
         true -> aplicar(Key, Entry, Limpio, Meta);
         false ->
-            %% Si la entrada es una escritura local protegida, debe entrar.
             {Version, _} = Entry,
-            Protegida = maps:get(Key, Locales, sin_version) =:= Version,
-            Candidato = candidato_no_protegido(Limpio, Locales),
+            Candidato = candidato_a_desalojar(Limpio),
             case Candidato of
                 ninguno -> rechazar(Peers, Key, Entry, Limpio, Meta);
                 {OtraKey, {OtraVersion, _} = OtraEntry} ->
-                    case Protegida orelse Version > OtraVersion of
+                    case Version > OtraVersion of
                         true ->
                             simple_kv_replicacion:ofrecer(Peers, OtraKey, OtraEntry),
                             {Reducido, NuevaMeta} = desalojar(OtraKey, Limpio, Meta),
@@ -49,24 +34,6 @@ guardar_vigente(Peers, Alfa, Key, Entry, Map, Metadatos, Locales) ->
                         false -> rechazar(Peers, Key, Entry, Limpio, Meta)
                     end
             end
-    end.
-
-%% Solo acumula clave/version, sin construir otro mapa de valores.
-candidato_no_protegido(Map, Locales) ->
-    Mejor = maps:fold(fun(K, {V, _}, Acc) ->
-        case maps:get(K, Locales, sin_version) =:= V of
-            true -> Acc;
-            false ->
-                case Acc of
-                    ninguno -> {K, V};
-                    {_, Anterior} when V < Anterior -> {K, V};
-                    _ -> Acc
-                end
-        end
-    end, ninguno, Map),
-    case Mejor of
-        ninguno -> ninguno;
-        {Key, _} -> {Key, maps:get(Key, Map)}
     end.
 
 aplicar(Key, {Version, {value, _, Vence}} = Entry, Map, Meta) ->
