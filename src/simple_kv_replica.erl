@@ -77,21 +77,21 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador) ->
             case Local of
                 %% tengo el valor: respondo (la API del cliente chequea el TTL)
                 {ok, {_Version, {value, _Val, _Vence}}} ->
-                    responder_lectura(Client, Ref, Local),
+                    simple_kv_consultas:responder(Client, Ref, Local),
                     loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador);
                 %% fue borrado: not_found
                 {ok, {_Version, borrado}} ->
-                    responder_lectura(Client, Ref, Local),
+                    simple_kv_consultas:responder(Client, Ref, Local),
                     loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador);
                 %% desalojado o desconocido, y no hay a quien preguntar
                 _ when Peers =:= [] ->
-                    responder_lectura(Client, Ref, Local),
+                    simple_kv_consultas:responder(Client, Ref, Local),
                     loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador);
                 %% desalojado o desconocido: pregunto a los pares (4.8)
                 %% y sigo atendiendo mensajes sin bloquearme (5.2)
                 _ ->
                     NuevosPendientes =
-                        consultar_pares(Peers, Client, Ref, Key, Local, Pendientes),
+                        simple_kv_consultas:iniciar(Peers, Client, Ref, Key, Local, Pendientes),
                     loop(Peers, Alfa, Map, Metadatos, NuevosPendientes, Coordinador)
             end;
         %% ---------- cambio que llega de otra replica ----------
@@ -124,7 +124,7 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador) ->
                 simple_kv_capacidad:aceptar_oferta(Key, Entry, Alfa, Map, Metadatos),
             loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes, Coordinador);
         {ordenada, Origen, Client, Ref, Key, Entry, Accion, Tipo} when is_pid(Coordinador) ->
-            {NewMap, NuevosMetadatos} = aplicar_ordenada(
+            {NewMap, NuevosMetadatos} = simple_kv_ordenada:aplicar(
                 Accion, Key, Entry, Map, Metadatos, Peers, Origen, Tipo),
             case self() =:= Origen andalso is_pid(Client) of
                 true -> Client ! {Ref, ok}; false -> ok
@@ -132,76 +132,11 @@ loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador) ->
             loop(Peers, Alfa, NewMap, NuevosMetadatos, Pendientes, Coordinador);
         %% ---------- respuesta a una consulta mia (4.8) ----------
         {respuesta_consulta, ConsultaRef, Peer, Resultado} ->
-            case maps:find(ConsultaRef, Pendientes) of
-                {ok, {Client, Ref, Key, Faltan}} ->
-                    case lists:member(Peer, Faltan) of
-                        false ->
-                            loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador);
-                        true ->
-                            %% El cliente acumula el candidato; Pendientes no guarda valores.
-                            Client ! {Ref, candidato, Resultado},
-                            Restantes = lists:delete(Peer, Faltan),
-                            case Restantes of
-                                [] ->
-                                    %% Comparar tambien con el estado local actualizado durante la espera.
-                                    Client ! {Ref, candidato,
-                                        simple_kv_almacen:buscar_local(Key, Map, Metadatos)},
-                                    Client ! {Ref, fin},
-                                    loop(Peers, Alfa, Map, Metadatos,
-                                         maps:remove(ConsultaRef, Pendientes), Coordinador);
-                                _ ->
-                                    Actualizado = {Client, Ref, Key, Restantes},
-                                    loop(Peers, Alfa, Map, Metadatos,
-                                         maps:put(ConsultaRef, Actualizado, Pendientes), Coordinador)
-                            end
-                    end;
-                error ->
-                    loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador)
-            end;
+            NuevosPendientes = simple_kv_consultas:recibir_respuesta(
+                ConsultaRef, Peer, Resultado, Map, Metadatos, Pendientes),
+            loop(Peers, Alfa, Map, Metadatos, NuevosPendientes, Coordinador);
 
         %% ---------- descartar mensajes inesperados (5.1) ----------
         _ ->
             loop(Peers, Alfa, Map, Metadatos, Pendientes, Coordinador)
     end.
-
-%% Manda {consultar, ...} a todos los pares y registra el get pendiente.
-consultar_pares(Peers, Client, Ref, Key, Local, Pendientes) ->
-    Client ! {Ref, candidato, Local},
-    Yo = self(),
-    ConsultaRef = make_ref(),
-    lists:foreach(
-        fun(Peer) -> Peer ! {consultar, Yo, ConsultaRef, Key} end,
-        Peers
-    ),
-    maps:put(ConsultaRef, {Client, Ref, Key, Peers}, Pendientes).
-
-%% Tambien lo local pasa por el cliente para revisar TTL justo antes de retornar.
-responder_lectura(Client, Ref, Resultado) ->
-    Client ! {Ref, candidato, Resultado},
-    Client ! {Ref, fin}.
-
-%% Las replicas aplican la decision ordenada; nunca vuelven a elegir victima.
-aplicar_ordenada(ignorar, _K, _E, M, Meta, _P, _O, _T) -> {M, Meta};
-aplicar_ordenada(borrar, K, E, M, Meta, _P, _O, _T) ->
-    {simple_kv_almacen:aplicar_actualizacion(K,E,M,Meta),
-     simple_kv_almacen:registrar_metadata(K,E,Meta)};
-aplicar_ordenada({rechazar, Version}, K, E, M, Meta, Peers, Origen, Tipo) ->
-    ofrecer_ordenado(K,E,Peers,Origen,Tipo),
-    {M, maps:put(K,{Version,desalojado},Meta)};
-aplicar_ordenada({guardar, Quitadas}, K, E, M, Meta, Peers, Origen, Tipo) ->
-    {M1, Meta1} = lists:foldl(fun(Victima,{Acc, AMeta}) ->
-        Entrada=maps:get(Victima,Acc),
-        ofrecer_ordenado(Victima,Entrada,Peers,Origen,Tipo),
-        simple_kv_capacidad:desalojar(Victima,Acc,AMeta)
-    end,{M,Meta},Quitadas),
-    {simple_kv_almacen:aplicar_actualizacion(K,E,M1,Meta1),
-     simple_kv_almacen:registrar_metadata(K,E,Meta1)}.
-
-ofrecer_ordenado(K,{_,{value,_,Vence}}=E,Peers,_Origen,put) ->
-    %% Cada replica ofrece su copia antes de descartarla; las ofertas no
-    %% generan nuevas ofertas y el coordinador ordena cualquier aceptacion.
-    case simple_kv_ttl:vigente(Vence) of
-        true -> simple_kv_replicacion:ofrecer(Peers,K,E);
-        false -> ok
-    end;
-ofrecer_ordenado(_,_,_,_,_) -> ok.

@@ -72,7 +72,7 @@ Las versiones se comparan con los metadatos conocidos. Una versión mayor gana; 
 
 Un delete crea `{Version, borrado}` y quita el valor. La lápida impide que un put anterior lo restaure; una nueva escritura sí puede reemplazarla. Desalojar deja `{Version, desalojado}`: es ausencia local, no delete. Si llega una copia de la misma versión, el almacén puede recuperarla; el selector de respuestas prefiere ese valor a la marca de desalojo de igual versión.
 
-El orden común prueba igualdad de estado bajo los supuestos y el protocolo público descritos; los tests finitos no demuestran todos los intercalados. La garantía del 75 % respecto de todos los registros conocidos, incluidos metadatos de entradas ausentes, sigue requiriendo revisión.
+El orden común fundamenta la igualdad de estado bajo los supuestos y el protocolo público descritos; los tests finitos no demuestran todos los intercalados. El selector protege residentes más entrante: no reconstruye valores ya desalojados tras un borrado.
 
 ---
 
@@ -94,7 +94,7 @@ La elección se calcula una sola vez en el coordinador, con el reloj en ese inst
 
 Cada réplica ofrece un valor vigente a sus pares antes de descartarlo. Una réplica receptora envía la propuesta al coordinador, que determina su admisión y distribuye el resultado en el flujo común. La aplicación de una oferta no produce nuevas ofertas; una oferta no desaloja un valor vigente. Por cada escritura hay una cantidad finita de réplicas y mensajes de oferta; ninguna oferta dispara otra cadena.
 
-Los índices y metadatos del coordinador no incluyen los valores de usuario. Los mensajes en tránsito sí transportan valores para ejecutar escrituras u ofertas. La interpretación de la cota respecto de datos transitorios y el cumplimiento del 75 % sobre todos los registros conocidos se mantienen como puntos de revisión, junto con las pruebas por API pública.
+Los índices y metadatos del coordinador no incluyen valores de usuario; los mensajes en tránsito sí los transportan. Las ofertas dan oportunidad de conservación, no la garantizan: si todas las réplicas descartan una entrada elegible, puede perderse. Liberar espacio más tarde no recupera una copia perdida.
 
 ---
 
@@ -112,6 +112,6 @@ Ni las réplicas ni el coordinador esperan sin atender mensajes a otra réplica:
 
 ### Pruebas y límites
 
-`rebar3 compile` y `rebar3 eunit` usan `warn_all` y `warnings_as_errors`; también puede usarse `erlc +warn_all -Werror`. La suite incluye API, TTL, versiones y borrados, selección y ofertas, y consultas cruzadas. Las nuevas pruebas pausan una réplica mientras otra completa escrituras y un delete, verifican que una decisión anterior al vencimiento se aplique igual al reanudarla, comprueban ofertas ordenadas y controlan el cierre del coordinador. Se comparan versiones y vencimientos locales completos.
+`rebar3 compile` y `rebar3 eunit` usan advertencias como errores. La suite cubre API, TTL, versiones, borrados, capacidad, ofertas y consultas. Por API pública se prueban puts y delete concurrentes sobre una clave, lecturas simultáneas con escritura y convergencia posterior. Pruebas internas complementarias controlan mensajes atrasados, ofertas y réplicas pausadas.
 
-Las pruebas internas permiten forzar orden y observación local, pero complementan las pruebas por la API externa. Debe revisarse la cobertura de todos los comportamientos exigidos por la consigna, así como la garantía del 75 % sobre lo registrado y la interpretación de la cota para datos en tránsito. El push al repositorio asignado por la cátedra y la verificación de integrantes corresponden al grupo.
+Una cantidad finita de pruebas no puede recorrer todos los intercalados, cargas, tiempos de TTL ni términos Erlang. La justificación para escrituras y ofertas es el orden único del coordinador y la aplicación de sus decisiones en cada réplica; para lecturas, referencias independientes y respuestas locales sin espera circular. El argumento supone procesos sin fallas, entrega eventual y procesamiento de mensajes. No demuestra formalmente cada implementación ni garantiza latencia acotada. La interpretación de la cota para datos en tránsito queda sujeta a la consigna.
