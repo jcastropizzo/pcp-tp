@@ -34,6 +34,7 @@ esperar_get(Ref, Mejor) ->
         {Ref, fin} -> resultado_get(Mejor)
     end.
 
+%% El candidato puede vencer mientras llegan respuestas: comprobar al retornar.
 resultado_get({ok, {_, {value, Val, Vence}}}) ->
     case simple_kv_ttl:vigente(Vence) of
         true -> {ok, Val};

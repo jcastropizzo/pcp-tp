@@ -1,6 +1,7 @@
 -module(simple_kv_v5_tests).
 -include_lib("eunit/include/eunit.hrl").
 
+%% Verifica que la API admite terminos compuestos y que start_link enlaza las replicas.
 terminos_compuestos_y_enlaces_test() ->
     {ok, Ps} = simple_kv:start_link(2, 3),
     try
@@ -43,6 +44,7 @@ stop_espera_terminacion_lenta_test() ->
         end
     end.
 
+%% El mensaje inesperado anterior a peers no debe quedar acumulado en el buzon.
 init_descarta_mensajes_test() ->
     P = spawn_link(fun simple_kv_replica:init/0),
     P ! inesperado_antes_de_peers,
@@ -88,6 +90,7 @@ escritores_concurrentes_convergen_al_mismo_map_test() ->
         ?assertEqual(Alfa,map_size(Esperado))
     after simple_kv:stop(Ps) end.
 
+%% Combina sobrescritura, delete y TTL cero con valores remotos de version posterior.
 sobrescritura_delete_ttl_y_trafico_remoto_test() ->
     {ok,[P]}=simple_kv:start_link(1,4),
     try
@@ -105,6 +108,7 @@ sobrescritura_delete_ttl_y_trafico_remoto_test() ->
         lists:foreach(fun(N)->?assertEqual({ok,N},simple_kv:get(P,{remoto,N})) end,[7,8,9,10])
     after simple_kv:stop([P]) end.
 
+%% Reconstruye los valores fisicos mediante consultas locales, sin recuperacion remota de get.
 map_local(P,Keys) ->
     lists:foldl(fun(K,Acc)->
         R=make_ref(), P ! {consultar,self(),R,K},
@@ -115,6 +119,7 @@ map_local(P,Keys) ->
         end
     end,#{},Keys).
 
+%% Espera convergencia con plazo acotado y muestra los mapas si el sistema no converge.
 esperar_maps_iguales(Ps,Keys,Alfa,Plazo) ->
     Maps=[map_local(P,Keys) || P <- Ps],
     case lists:usort(Maps) of
@@ -149,11 +154,13 @@ consultas_reenvian_y_filtran_respuestas_test() ->
         receive {Ref, candidato, {ok, {100,borrado}}} -> error(acepto_duplicado) after 0 -> ok end
     after simple_kv:stop([P]), exit(Gate, kill) end.
 
+%% Retiene una consulta para controlar cuando llega la respuesta del ultimo par.
 gate() ->
     receive {consultar, P, Ref, _} ->
         receive {liberar, _} -> P ! {respuesta_consulta, Ref, self(), error} end
     end.
 
+%% Fuerza que un candidato expire mientras falta un par y exige comprobar TTL al finalizar.
 valor_remoto_vence_antes_de_finalizar_get_test() ->
     Gate = spawn(fun gate/0),
     P = spawn_link(fun simple_kv_replica:init/0),
@@ -171,6 +178,7 @@ valor_remoto_vence_antes_de_finalizar_get_test() ->
         receive {leido, Rdo} -> ?assertEqual(not_found, Rdo) after 1000 -> error(sin_resultado) end
     after simple_kv:stop([P]), exit(Gate, kill) end.
 
+%% Comprueba simultaneamente que TTL cero ocupa capacidad si esta protegido y que get lo oculta.
 put_ttl_cero_reciente_ocupa_lugar_y_no_se_devuelve_test() ->
     {ok, [P]} = simple_kv:start_link(1, 3),
     try
@@ -182,6 +190,7 @@ put_ttl_cero_reciente_ocupa_lugar_y_no_se_devuelve_test() ->
         ?assertMatch(#{nueva := {_,{value,vencida,_}}},map_local(P,[1,2,3,nueva]))
     after simple_kv:stop([P]) end.
 
+%% Entrega un delete atrasado despues del put para asegurar que la version mayor prevalezca.
 delete_replicado_viejo_conserva_valor_nuevo_test() ->
     {ok, [P]} = simple_kv:start_link(1,3),
     try
@@ -192,6 +201,7 @@ delete_replicado_viejo_conserva_valor_nuevo_test() ->
 
 %% Reproduce la divergencia causada por el cupo local: ahora todas las claves
 %% locales antiguas salen frente a Alfa versiones remotas mas nuevas.
+%% Demuestra que la proteccion depende de version, no de que el valor sea de origen local.
 versiones_remotas_desplazan_todas_las_locales_antiguas_test() ->
     {ok,[P]}=simple_kv:start_link(1,3),
     try
@@ -201,6 +211,7 @@ versiones_remotas_desplazan_todas_las_locales_antiguas_test() ->
         ?assertEqual(maps:from_list(Remotas),map_local(P,[a,b,c,d,e,f]))
     after simple_kv:stop([P]) end.
 
+%% Con TTL infinito compara directamente los mapas tras entregar las mismas versiones en orden inverso.
 mismas_entradas_en_ordenes_opuestos_producen_maps_iguales_test() ->
     {ok,[P1,P2]=Ps}=simple_kv:start_link(2,3),
     Entradas=[{K,{N,{value,K,infinity}}} || {K,N} <- lists:zip([a,b,c,d,e,f],lists:seq(1,6))],
