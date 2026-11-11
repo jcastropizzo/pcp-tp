@@ -58,7 +58,9 @@ Todo put o delete público se deriva al coordinador, que asigna una versión con
 
 Una réplica no vuelve a elegir la víctima ni a evaluar qué entradas estaban vencidas al decidir. Aplica la acción ordenada y, si recibió el pedido del cliente, responde después de su aplicación local. La operación no espera que el resto aplique el evento: la replicación sigue siendo asincrónica.
 
-### Por qué se ordena igual
+### Consistencia observable y orden común
+
+La consistencia eventual se evalúa desde afuera: cuando cesan las escrituras y se propagan los cambios, los nodos deben responder de forma consistente y correcta. La consigna no exige por sí misma que sus estados internos sean idénticos. Este diseño utiliza mapas iguales como estrategia para lograr esa propiedad; otros diseños podrían resolver las lecturas con estados físicos diferentes. El TTL sigue aplicándose en el instante de cada lectura.
 
 Todos los eventos mutables de la API pública y de ofertas salen del mismo coordinador hacia cada réplica. Erlang preserva el orden por pareja emisor/receptor. Las réplicas parten del mismo estado y aplican las mismas acciones con las mismas entradas; por inducción sus mapas coinciden luego de aplicar el mismo prefijo de eventos. Si cesan las escrituras, llegan los mensajes y las ofertas terminan, alcanzan el mismo mapa. Los resultados transitorios pueden diferir mientras unas réplicas avanzan más que otras.
 
