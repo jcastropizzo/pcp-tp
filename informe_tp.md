@@ -39,7 +39,6 @@ Al contestar un `get`, se evalúa el vencimiento del candidato ganador, incluso 
 | `{consultar, Solicitante, RefConsulta, Clave}` | Réplica que atiende un `get` | Todos sus pares | Solicita la entrada o marca local. |
 | `{respuesta_consulta, RefConsulta, Par, Resultado}` | Par consultado | Réplica solicitante | Aporta un candidato y completa el turno de ese par para esa lectura. |
 | `stop` | Invocante de `stop/1` | Réplica monitoreada | Termina su ciclo de recepción. |
-| `{'DOWN', Monitor, process, Pid, Motivo}` | BEAM | Invocante de `stop/1` | Confirma que el pid monitoreado terminó y habilita el cierre del siguiente. |
 
 Cada pedido usa una referencia única. `put` y `delete` devuelven `ok` después de aplicar el cambio local, sin esperar confirmaciones de los pares. `stop/1` devuelve `ok` después de recibir los avisos de terminación de todos los pids.
 
