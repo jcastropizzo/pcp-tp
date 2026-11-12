@@ -53,7 +53,7 @@ El corte del ranking se mantiene o sube a medida que se conocen escrituras. Una 
 
 Antes de descartar un valor vigente, se lo ofrece a todos los pares. Un par puede aceptar una oferta en una plaza libre, en la plaza de la misma clave o reemplazando un vencido elegible. Tramitar una oferta no emite mensajes. Por cada desalojo vigente hay a lo sumo un envío por par y ninguna cadena de ofertas. Si todos lo descartan, se admite la pérdida en el peor caso contemplado por la consigna.
 
-## 6. Lecturas y convergencia
+## 6. Algoritmo de `get` y convergencia
 
 Si la réplica tiene un valor o un borrado, usa esa información. Si desconoce la clave o la tiene desalojada, consulta a todos los pares y vuelve al ciclo normal. Cada par contesta con su estado local y sigue atendiendo. Con la referencia de consulta, la solicitante acepta una respuesta por par, elige el candidato de mayor versión y, a igual versión, prefiere un valor a una marca de desalojo. Al completar el conjunto, vuelve a comparar con su información local y verifica el TTL.
 
@@ -62,3 +62,32 @@ La réplica sigue atendiendo durante la espera y cada consulta entre pares se re
 Después de que cesan las escrituras y se procesan las actualizaciones y ofertas, todas las réplicas conocen la mayor versión por clave. Si la versión ganadora es un borrado o está vencida, la lectura da `not_found`. Si una réplica conserva una copia vigente, las que la desalojaron pueden obtenerla por consulta. Si se perdió la última copia, todas devuelven `not_found`. Los mapas locales pueden diferir según el momento del desalojo. Las lecturas a lados distintos del instante de expiración pueden observar resultados distintos.
 
 Las pruebas incluyen versiones en órdenes opuestos, borrados atrasados, ofertas, consultas concurrentes, TTL durante una consulta y desalojo asimétrico entre dos réplicas. Verifican escenarios concretos. Los argumentos anteriores cubren el diseño bajo los supuestos de la consigna.
+
+## 7. Ejemplos de lectura y desalojo
+
+### Lectura de un valor desalojado
+
+Dos réplicas tienen capacidad α = 4 y protegen las tres escrituras más recientes. P1 escribe, en orden, `k`, `temporal`, `a`, `b` y `c`. Solo `temporal` tiene TTL finito. P2 está demorada.
+
+Al guardar `c`, P1 protege `a`, `b` y `c`. Los candidatos son `k` y `temporal`, ambos vigentes en ese momento. P1 ofrece y desaloja `k` por ser el más antiguo. Cuando P2 procesa esa misma escritura, `temporal` ya venció. P2 desaloja `temporal` y conserva `k`.
+
+| Réplica | Metadatos de `k` | Copia local de `k` | Respuesta de `get/2` para `k` tras la propagación |
+| --- | --- | --- | --- |
+| P1 | `{Vk, desalojado}` | Ausente | `{ok, k}`, tras consultar a P2. |
+| P2 | `{Vk, valor}` | Vigente, versión `Vk` | `{ok, k}`, desde su copia local. |
+
+P1 envía `{consultar, P1, RefConsulta, k}` a P2 y registra el pedido en `Pendientes`. P2 devuelve la entrada de versión `Vk`. Como esa versión coincide con la marca de desalojo de P1, gana la entrada con valor. P1 vuelve a comparar con su estado local, comprueba el TTL, responde al cliente y elimina la consulta. Para `temporal`, P1 detecta el vencimiento al leer su copia. P2 consulta a P1 y comprueba el mismo vencimiento. Ambos devuelven `not_found`.
+
+Si intervienen dos pares, el primer candidato puede quedar en `Pendientes` mientras llega la segunda respuesta. En el test `valor_remoto_vence_antes_de_finalizar_get_test/0`, ese candidato vence durante la espera. Cuando llega la última respuesta, la réplica comprueba el vencimiento y devuelve `not_found`. El candidato se retiene para esa lectura y se elimina al cerrarla. Las plazas de α se contabilizan en `Valores`.
+
+### Vencimientos en la frontera del 75 %
+
+Con α = 5 se protegen cuatro escrituras. Una réplica escribe `a`, `b`, `c`, `d` y `e`, en ese orden. `b` y `c` tienen TTL cero. Después recibe dos escrituras remotas más nuevas, `f` y `g`.
+
+| Momento | Protegidas | Víctima | Claves que ocupan plaza |
+| --- | --- | --- | --- |
+| Después de `e` | `b, c, d, e` | Ninguna | `a, b, c, d, e` |
+| Llega `f` | `c, d, e, f` | `b`, vencida y elegible | `a, c, d, e, f` |
+| Llega `g` | `d, e, f, g` | `c`, vencida y elegible | `a, d, e, f, g` |
+
+Entre `f` y `g`, `c` sigue ocupando una plaza protegida y `get(P, c)` devuelve `not_found`. En ambos desalojos se conserva `a`, que es la escritura más antigua, porque la prioridad entre los elegibles la tiene una vencida.
