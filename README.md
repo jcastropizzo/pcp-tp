@@ -18,7 +18,6 @@
 | §§5.1–5.2 · Correlación y ausencia de deadlock | **Implementado y verificado para el protocolo válido** | Referencias por pedido y consulta, una respuesta por par y descarte de mensajes inesperados. Las réplicas contestan consultas mientras otras están pendientes. [Tests](test/simple_kv_consultas_tests.erl) |
 | §6 · Restricciones y compilación | **Implementado y verificado** | Estado en argumentos del ciclo, sin dependencias de behaviours ni almacenamiento externo. El nombre de `src/simple_kv_ttl.erl` coincide con el del módulo. |
 | §8 · Tests propios e informe de hasta cinco páginas | **Implementado y verificado** | La suite incluye escenarios por API y pruebas controladas del protocolo. El PDF tiene cuatro páginas e incluye la tabla de mensajes, los argumentos de corrección y ejemplos de lectura y desalojo. |
-| §8 · Publicación | **Pendiente** | Trasladar la versión final al repositorio asignado y verificar el commit y ambos integrantes. `rebar3` es una recomendación de la consigna. |
 
 ## Alcance de las decisiones
 
