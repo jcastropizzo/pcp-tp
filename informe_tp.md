@@ -1,69 +1,92 @@
-# TP Key-Value replicado – Documento de diseño
+# Base de datos key-value replicada
 
-## 1. Estructura de las réplicas
+Programación Concurrente y Paralela · Segundo cuatrimestre de 2026
 
-Cada réplica es un proceso de Erlang que corre un `loop` y va pasando su estado de una vuelta a la siguiente. En ese estado guarda varias cosas.
+## 1. Estado de cada réplica
 
-Primero, la lista de pids de las otras réplicas (`Peers`). La necesita porque cada vez que hay un cambio se lo tiene que avisar a las demás, y también para ofrecerles valores cuando desaloja o para preguntarles cuando le piden algo que no tiene.
+Cada réplica es un proceso enlazado al invocante de `start_link/2`. Recibe los pids de sus pares y la capacidad α. El estado pasa por los argumentos de su ciclo de recepción.
 
-También guarda `Alfa`, que es la cantidad máxima de valores que puede tener al mismo tiempo.
+- `Valores` guarda hasta α asociaciones `Clave => {Version, {valor, Valor, Vence}}`. Cada clave ocupa a lo sumo una plaza.
+- `Metadatos` guarda la mayor versión aplicada de cada clave y su estado, `valor`, `borrado` o `desalojado`. Las marcas sobreviven a la salida del valor y permiten rechazar mensajes obsoletos.
+- `Recientes` registra claves y versiones de las últimas escrituras conocidas que definen la protección de capacidad. La cantidad de registros está acotada por el cupo protegido.
+- `Pendientes` registra cada lectura en curso, su cliente, la clave, los pares que todavía deben contestar y el mejor candidato transitorio. La entrada se elimina al responder. Solo `Valores` se usa como almacenamiento de la base de datos.
 
-Los datos van en un mapa (`Map`). Para cada clave se guarda `{Version, Valor, Vence}`. La versión sirve para decidir qué cambio gana cuando dos llegan desordenados. El vencimiento se guarda como un instante absoluto, no como un TTL relativo, así cualquier réplica puede saber si el valor sigue vigente sin importar cuándo le llegó. Este mapa es lo único que cuenta para la capacidad α.
+## 2. Versiones, conflictos y borrados
 
-Aparte hay metadatos de claves que no tienen valor. Ahí están las lápidas de los borrados (la clave marcada como `borrado` con su versión) y las marcas de claves que fueron desalojadas. Las lápidas hacen falta para que un put viejo que llega tarde no vuelva a crear algo que ya se borró. Estos metadatos no ocupan lugar de α.
+Cada escritura o borrado recibe una versión de `erlang:unique_integer([monotonic])`. Dentro de la única VM BEAM, las versiones son únicas y crecientes. Una réplica compara la versión entrante con la mayor que conoce para esa clave. El máximo es independiente del orden de entrega. Una marca de borrado conserva su versión aunque se haya liberado la plaza. Un `put` anterior queda descartado y uno posterior puede volver a crear la clave.
 
-Por último, la réplica tiene una lista de `Pendientes`: los get que mandó a preguntar a otras réplicas y que todavía están esperando respuestas.
+Un desalojo conserva la versión como marca `desalojado`. Una copia de esa misma versión puede recuperarse por consulta o volver a ocupar una plaza. Esto permite distinguir la falta de una copia local del borrado de la clave.
 
-## 2. Protocolo de comunicación
+## 3. Vencimiento
 
-Al arrancar, `start_link` crea todas las réplicas y le manda a cada una un mensaje `peers` con la lista de las demás y el valor de α. Cuando lo recibe, la réplica guarda esos datos y empieza a atender pedidos.
+`put/4` valida el TTL en el invocante. Se mide en milisegundos y admite enteros no negativos e `infinity`. La réplica de origen convierte un TTL finito en un instante del reloj monótono de la VM, y replica ese mismo vencimiento. El TTL cero vence al escribir.
 
-El cliente se comunica con una réplica mediante `put`, `get`, `delete` y `stop`. Todos llevan una `Ref` para que el cliente sepa que la respuesta que recibe es la suya.
+Al contestar un `get`, se evalúa el vencimiento del candidato ganador, incluso si llegó desde un par durante una espera. Un vencido da `not_found`. Al hacer lugar, el TTL sirve también para priorizar una víctima entre los candidatos elegibles. Una escritura protegida conserva su plaza aunque haya vencido.
 
-Cuando una réplica recibe un `put` con clave, valor y TTL, genera una versión nueva, guarda el valor, le responde ok al cliente y le manda un `replica` a las demás. Si con eso se pasó de α, desaloja.
+## 4. Protocolo de comunicación
 
-El `delete` es parecido: genera una versión nueva, saca el valor, deja una lápida, responde ok y también avisa con un `replica`.
+| Mensaje | Emisor | Receptor | Efecto |
+| --- | --- | --- | --- |
+| `{configurar, Pares, Alfa}` | Invocante de `start_link/2` | Réplica nueva | Inicializa los pares, la capacidad y los mapas. |
+| `{put, Cliente, RefCliente, Clave, Valor, TTL}` | Cliente | Réplica elegida | Genera versión y vencimiento, aplica la escritura con el límite de capacidad y propaga el cambio. |
+| `{delete, Cliente, RefCliente, Clave}` | Cliente | Réplica elegida | Quita el valor, guarda una marca versionada y propaga el borrado. |
+| `{get, Cliente, RefCliente, Clave}` | Cliente | Réplica elegida | Responde a partir de la información local o inicia una consulta a los pares. |
+| `{RefCliente, ok}` | Réplica | Cliente | Completa el `put` o `delete` local. |
+| `{RefCliente, ok, Valor}` | Réplica | Cliente | Completa un `get` con el valor vigente. |
+| `{RefCliente, not_found}` | Réplica | Cliente | Completa un `get` sin valor disponible. |
+| `{replicar, Clave, Entrada}` | Réplica de origen | Todos sus pares | Aplica un valor o borrado versionado según el orden de versiones. |
+| `{ofrecer, Clave, Entrada}` | Réplica que desaloja | Todos sus pares | Da al receptor la opción de conservar un valor vigente. |
+| `{consultar, Solicitante, RefConsulta, Clave}` | Réplica que atiende un `get` | Todos sus pares | Solicita la entrada o marca local. |
+| `{respuesta_consulta, RefConsulta, Par, Resultado}` | Par consultado | Réplica solicitante | Aporta un candidato y completa el turno de ese par para esa lectura. |
+| `stop` | Invocante de `stop/1` | Réplica monitoreada | Termina su ciclo de recepción. |
 
-El mensaje `replica` va de una réplica a todas las otras con la clave, la versión y el valor con su vencimiento, o la lápida si fue un borrado. La que lo recibe solo lo aplica si esa versión es mayor que la que ya tiene. Después revisa si se pasó de capacidad. No responde nada.
+Cada pedido usa una referencia única. `put` y `delete` devuelven `ok` después de aplicar el cambio local, sin esperar confirmaciones de los pares. `stop/1` devuelve `ok` después de recibir los avisos de terminación de todos los pids.
 
-El mensaje `ofrecer` lo manda una réplica que está desalojando un valor, con la clave, la versión y el valor. La que lo recibe lo guarda solo si tiene lugar y si es más nuevo que lo que tiene. Si no, lo ignora. En ningún caso responde ni desaloja nada.
+## 5. Capacidad y desalojo
 
-Cuando una réplica recibe un `get` y no tiene el valor porque lo desalojó, manda `consulta` a las demás con su pid, la `Ref` y la clave. Cada una contesta en el momento con un `respuesta` que trae lo que tiene de esa clave (versión y valor, lápida o nada). La que preguntó va anotando las respuestas y, cuando tiene todas, le contesta al cliente.
+Se protege un cupo de `ceil(3 × α / 4)` claves distintas por su última escritura conocida en la réplica, incluyendo escrituras remotas. En un `put` o una actualización de un par, el valor entrante se considera al armar el ranking. Una oferta aceptada también registra su versión. Un borrado libera de inmediato la plaza y su escritura previa puede seguir en el ranking histórico. Así, el borrado no vuelve a proteger retroactivamente una clave cuya última copia ya se perdió.
 
-Con `stop`, la réplica responde ok y termina.
+Una sobrescritura reutiliza su plaza y una clave nueva usa una plaza libre. Si el mapa está lleno, se elige entre los valores fuera de la protección, incluido el entrante si es elegible. Se toma primero un vencido, en orden de versión, y en su defecto el valor de menor versión. Se retira la víctima antes de insertar en el mapa. Si la víctima es el entrante, se registra su marca de desalojo sin guardarlo.
 
-## 3. Resolución de conflictos y borrados
+El corte del ranking se mantiene o sube a medida que se conocen escrituras. Una versión que salió de la protección solo puede volver a quedar protegida con una escritura más nueva de esa clave. Al haber α residentes más el entrante, existe al menos un candidato fuera del cupo protegido. Las escrituras protegidas que sigan vigentes conservan su copia local tras la actualización.
 
-Elegimos last-writer-wins con lápidas. Cada put o delete recibe una versión que genera la réplica que lo atiende con `erlang:unique_integer([monotonic])`. Ese número nunca se repite y siempre crece, así que nunca hay dos versiones iguales.
+Antes de descartar un valor vigente, se lo ofrece a todos los pares. Un par puede aceptar una oferta en una plaza libre, en la plaza de la misma clave o reemplazando un vencido elegible. Tramitar una oferta no emite mensajes. Por cada desalojo vigente hay a lo sumo un envío por par y ninguna cadena de ofertas. Si todos lo descartan, se admite la pérdida en el peor caso contemplado por la consigna.
 
-Cuando a una réplica le llega un cambio sobre una clave, compara versiones y se queda con la mayor. El borrado funciona exactamente igual que un put, solo que en lugar de un valor guarda una lápida con su versión.
+## 6. Algoritmo de `get` y convergencia
 
-Esto funciona por varias razones. Como siempre se queda la versión más alta, no importa en qué orden lleguen los mensajes ni si llega alguno repetido: el resultado es el mismo. Entonces, una vez que todas las réplicas recibieron todos los cambios, todas tienen lo mismo. Si hay dos put concurrentes sobre la misma clave en réplicas distintas, todas eligen el de versión más alta, o sea que todas eligen el mismo. Y si un put viejo llega después de un delete, pierde porque su versión es menor que la de la lápida, así que el dato borrado no reaparece. En cambio, si el usuario hace un put nuevo después del borrado, ese tiene versión mayor y gana.
+Si la réplica tiene un valor o un borrado, usa esa información. Si desconoce la clave o la tiene desalojada, consulta a todos los pares y vuelve al ciclo normal. Cada par contesta con su estado local y sigue atendiendo. Con la referencia de consulta, la solicitante acepta una respuesta por par, elige el candidato de mayor versión y, a igual versión, prefiere un valor a una marca de desalojo. Al completar el conjunto, vuelve a comparar con su información local y verifica el TTL.
 
-## 4. Detección de vencimiento
+La réplica sigue atendiendo durante la espera y cada consulta entre pares se responde en un solo paso local. Bajo los supuestos de procesos vivos, entrega y ejecución eventual, no se forma una dependencia circular. El candidato en `Pendientes` existe durante ese pedido y solo interviene en su respuesta. Los demás pedidos consultan su propia información local y, si hace falta, inician su propia lectura.
 
-Cuando se hace un put se calcula `Vence = ahora + TTL`, o `infinity` si no tiene TTL, y ese valor viaja así en la replicación. No usamos timers: el vencimiento se revisa en el momento en que se usa el valor.
+Después de que cesan las escrituras y se procesan las actualizaciones y ofertas, todas las réplicas conocen la mayor versión por clave. Si la versión ganadora es un borrado o está vencida, la lectura da `not_found`. Si una réplica conserva una copia vigente, las que la desalojaron pueden obtenerla por consulta. Si se perdió la última copia, todas devuelven `not_found`. Los mapas locales pueden diferir según el momento del desalojo. Las lecturas a lados distintos del instante de expiración pueden observar resultados distintos.
 
-En un get, si `ahora >= Vence`, el valor se toma como si no existiera y se responde `not_found`. Lo mismo pasa cuando otra réplica responde una consulta: un valor vencido no se devuelve. Al desalojar, antes de sacar un valor válido se limpian los vencidos, que quedan marcados como borrados con su misma versión para que un mensaje viejo no los vuelva a crear.
+Las pruebas incluyen versiones en órdenes opuestos, borrados atrasados, ofertas, consultas concurrentes, TTL durante una consulta y desalojo asimétrico entre dos réplicas. Verifican escenarios concretos. Los argumentos anteriores cubren el diseño bajo los supuestos de la consigna.
 
-Como todas las réplicas comparan contra el mismo instante absoluto, todas coinciden en cuándo vence un valor, aunque lo hayan recibido en momentos distintos.
+## 7. Ejemplos de lectura y desalojo
 
-## 5. Desalojo
+### Lectura de un valor desalojado
 
-Cada réplica puede tener como máximo α valores. Después de guardar un valor, ya sea por un put o por un `replica`, revisa si se pasó.
+Dos réplicas tienen capacidad α = 4 y protegen las tres escrituras más recientes. P1 escribe, en orden, `k`, `temporal`, `a`, `b` y `c`. Solo `temporal` tiene TTL finito. P2 está demorada.
 
-Si se pasó, primero saca los valores vencidos. Si con eso vuelve a estar dentro del límite, termina ahí y no se pierde nada válido. Si no alcanza, elige el valor de menor versión, que es el que se escribió hace más tiempo, se lo ofrece a las demás réplicas con `ofrecer`, lo saca de su mapa y deja una marca de que fue desalojado. Así, si después le piden esa clave, sabe que tiene que ir a buscarla a otra réplica.
+Al guardar `c`, P1 protege `a`, `b` y `c`. Los candidatos son `k` y `temporal`, ambos vigentes en ese momento. P1 ofrece y desaloja `k` por ser el más antiguo. Cuando P2 procesa esa misma escritura, `temporal` ya venció. P2 desaloja `temporal` y conserva `k`.
 
-Esto no genera mensajes infinitos. Una réplica solo acepta una oferta si tiene menos de α valores, así que después de aceptarla sigue dentro del límite y nunca necesita desalojar por eso. Además, no responde nada a la oferta. Entonces una oferta nunca dispara otro mensaje, y cada desalojo termina después de mandar un mensaje a cada réplica.
+| Réplica | Metadatos de `k` | Copia local de `k` | Respuesta de `get/2` para `k` tras la propagación |
+| --- | --- | --- | --- |
+| P1 | `{Vk, desalojado}` | Ausente | `{ok, k}`, tras consultar a P2. |
+| P2 | `{Vk, valor}` | Vigente, versión `Vk` | `{ok, k}`, desde su copia local. |
 
-Tampoco se desaloja de más. Cada réplica atiende un mensaje por vez y solo desaloja hasta volver a α. Como los valores se agregan de a uno, en cada caso sale como mucho uno.
+P1 envía `{consultar, P1, RefConsulta, k}` a P2 y registra el pedido en `Pendientes`. P2 devuelve la entrada de versión `Vk`. Como esa versión coincide con la marca de desalojo de P1, gana la entrada con valor. P1 vuelve a comparar con su estado local, comprueba el TTL, responde al cliente y elimina la consulta. Para `temporal`, P1 detecta el vencimiento al leer su copia. P2 consulta a P1 y comprueba el mismo vencimiento. Ambos devuelven `not_found`.
 
-## 6. Algoritmo para get
+Si intervienen dos pares, el primer candidato puede quedar en `Pendientes` mientras llega la segunda respuesta. En el test `valor_remoto_vence_antes_de_finalizar_get_test/0`, ese candidato vence durante la espera. Cuando llega la última respuesta, la réplica comprueba el vencimiento y devuelve `not_found`. El candidato se retiene para esa lectura y se elimina al cerrarla. Las plazas de α se contabilizan en `Valores`.
 
-Si la réplica tiene la clave vigente en su mapa, responde directamente. Si tiene una lápida, responde `not_found`. El caso interesante es cuando la clave fue desalojada o no la conoce: ahí tiene que preguntarles a las demás.
+### Vencimientos en la frontera del 75 %
 
-En ese caso manda `consulta` a todas las otras réplicas y anota el pedido en `Pendientes`, con el cliente, la `Ref` y cuántas respuestas le faltan. Después vuelve a su `loop` normal, sin quedarse bloqueada, y sigue atendiendo puts, gets, replicaciones, ofertas y consultas de otras réplicas mientras espera.
+Con α = 5 se protegen cuatro escrituras. Una réplica escribe `a`, `b`, `c`, `d` y `e`, en ese orden. `b` y `c` tienen TTL cero. Después recibe dos escrituras remotas más nuevas, `f` y `g`.
 
-Cada respuesta que llega se suma al pedido pendiente. Cuando ya tiene todas, junta lo que le contestaron con lo que tiene ella, se queda con la versión más alta y, si es un valor vigente, se lo devuelve al cliente. Si no encontró nada, o lo que ganó es una lápida o un valor vencido, responde `not_found`.
+| Momento | Protegidas | Víctima | Claves que ocupan plaza |
+| --- | --- | --- | --- |
+| Después de `e` | `b, c, d, e` | Ninguna | `a, b, c, d, e` |
+| Llega `f` | `c, d, e, f` | `b`, vencida y elegible | `a, c, d, e, f` |
+| Llega `g` | `d, e, f, g` | `c`, vencida y elegible | `a, d, e, f, g` |
 
-Esto no produce deadlock porque ninguna réplica se queda trabada en un `receive` esperando a otra. Las consultas se responden en el momento con lo que cada réplica tiene, sin preguntarle a nadie más. Entonces, aunque dos réplicas se consulten entre sí al mismo tiempo, cada una contesta la consulta de la otra desde su `loop` normal y las dos terminan. El único que se queda esperando es el cliente, y siempre recibe su respuesta porque todas las réplicas consultadas contestan.
+Entre `f` y `g`, `c` sigue ocupando una plaza protegida y `get(P, c)` devuelve `not_found`. En ambos desalojos se conserva `a`, que es la escritura más antigua, porque la prioridad entre los elegibles la tiene una vencida.

@@ -1,120 +1,122 @@
 -module(simple_kv_capacidad).
--export([hacer_lugar/4, aceptar_oferta/5, candidato_a_desalojar/1, desalojar/3]).
+-export([guardar/6, aceptar_oferta/6, entrada_mas_antigua/1]).
 
--type entry() :: {integer(), {value, term(), integer() | infinity}}.
--type valores() :: #{term() => entry()}.
+-type entrada() :: {integer(), {valor, term(), integer() | infinity}}.
+-type valores() :: #{term() => entrada()}.
 -type metadatos() :: #{term() => {integer(), valor | borrado | desalojado}}.
+-type recientes() :: #{term() => integer()}.
+-type estado() :: {valores(), metadatos(), recientes()}.
 
-%% ---------------------------------------------------------------------
-%% Politica de desalojo (4.7)
-%%
-%% Se llama DESPUES de insertar un valor (put local o replica recibida).
-%%  1. Si hay a lo sumo Alfa valores, no hace nada.
-%%  2. Si hay mas de Alfa, primero retira los vencidos: no sirven para
-%%     nada y sacarlos no pierde ningun dato valido.
-%%  3. Si sigue habiendo mas de Alfa, desaloja el valor de MENOR version
-%%     (el escrito hace mas tiempo). Antes de descartarlo lo ofrece a las
-%%     demas replicas.
-%%
-%% Por que se conserva el 75 % mas reciente: las versiones salen de
-%% erlang:unique_integer([monotonic]), que siempre crece. Como se inserta
-%% de a un valor, cuando hay que desalojar hay Alfa + 1 valores y sale
-%% solo el de menor version. Los Alfa mas recientes siguen disponibles,
-%% que es mas que el 75 % pedido.
-%% ---------------------------------------------------------------------
--spec hacer_lugar([pid()], pos_integer(), valores(), metadatos()) ->
-    {valores(), metadatos()}.
-hacer_lugar(Peers, Alfa, Map, Metadatos) ->
-    case map_size(Map) > Alfa of
+-spec guardar([pid()], pos_integer(), term(), entrada(), valores(),
+              {metadatos(), recientes()}) -> estado().
+guardar(Pares, Alfa, Clave, Entrada, Valores, {Metadatos, Recientes}) ->
+    NuevosRecientes = registrar_escritura(Alfa, Clave, Entrada, Recientes),
+    case simple_kv_almacen:version_no_obsoleta(Clave, Entrada, Metadatos) of
         false ->
-            {Map, Metadatos};
+            {Valores, Metadatos, NuevosRecientes};
         true ->
-            {MapLimpio, MetadatosLimpios} = limpiar_vencidos(Map, Metadatos),
-            desalojar_hasta(Peers, Alfa, MapLimpio, MetadatosLimpios)
+            case hay_lugar(Clave, Alfa, Valores) of
+                true ->
+                    aplicar(Clave, Entrada, Valores, Metadatos, NuevosRecientes);
+                false ->
+                    Elegibles = elegibles(Valores, NuevosRecientes),
+                    Candidatos = case maps:is_key(Clave, NuevosRecientes) of
+                        true -> Elegibles;
+                        false -> maps:put(Clave, Entrada, Elegibles)
+                    end,
+                    {Victima, Valor} = elegir_descarte(Candidatos),
+                    {Reducido, Meta} = desalojar(Pares, Victima, Valor, Valores, Metadatos),
+                    case Victima =:= Clave of
+                        true -> {Reducido, Meta, NuevosRecientes};
+                        false -> aplicar(Clave, Entrada, Reducido, Meta, NuevosRecientes)
+                    end
+            end
     end.
 
-%% Desaloja de a un valor mientras se supere Alfa.
--spec desalojar_hasta([pid()], pos_integer(), valores(), metadatos()) ->
-    {valores(), metadatos()}.
-desalojar_hasta(Peers, Alfa, Map, Metadatos) ->
-    case map_size(Map) > Alfa of
+%% Aceptar una oferta puede liberar una plaza vencida elegible. Al tramitarla
+%% sin emitir mensajes, el receptor corta la cadena de ofertas.
+-spec aceptar_oferta(term(), term(), pos_integer(), valores(), metadatos(),
+                     recientes()) -> estado().
+aceptar_oferta(Clave, {_, {valor, _, Vence}} = Entrada, Alfa, Valores, Metadatos, Recientes) ->
+    case simple_kv_ttl:vigente(Vence)
+         andalso simple_kv_almacen:version_no_obsoleta(Clave, Entrada, Metadatos) of
         false ->
-            {Map, Metadatos};
+            {Valores, Metadatos, Recientes};
         true ->
-            {Key, Entry} = candidato_a_desalojar(Map),
-            simple_kv_replicacion:ofrecer(Peers, Key, Entry),
-            {NuevoMap, NuevosMetadatos} = desalojar(Key, Map, Metadatos),
-            desalojar_hasta(Peers, Alfa, NuevoMap, NuevosMetadatos)
-    end.
-
-%% ---------------------------------------------------------------------
-%% Recepcion de una oferta
-%%
-%% La replica que recibe la oferta la guarda SOLO si:
-%%  - el valor sigue vigente,
-%%  - no conoce una version mas nueva de la clave, y
-%%  - tiene lugar (o la clave ya ocupa un lugar en su Map).
-%%
-%% Nunca desaloja ni manda mensajes al procesar una oferta. Por eso cada
-%% desalojo genera como mucho un mensaje por par y la secuencia termina.
-%% Si todas las replicas estan llenas, el valor se pierde (lo admite 4.7).
-%% ---------------------------------------------------------------------
--spec aceptar_oferta(term(), term(), pos_integer(), valores(), metadatos()) ->
-    {valores(), metadatos()}.
-aceptar_oferta(Key, {_Version, {value, _Val, Vence}} = Entry, Alfa, Map, Metadatos) ->
-    {MapLimpio, MetadatosLimpios} = limpiar_vencidos(Map, Metadatos),
-    Vigente = simple_kv_ttl:vigente(Vence),
-    EsNuevo = simple_kv_almacen:es_mensaje_nuevo(Key, Entry, MetadatosLimpios),
-    HayLugar = maps:is_key(Key, MapLimpio) orelse map_size(MapLimpio) < Alfa,
-    case Vigente andalso EsNuevo andalso HayLugar of
-        true ->
-            {simple_kv_almacen:aplicar_actualizacion(Key, Entry, MapLimpio, MetadatosLimpios),
-             simple_kv_almacen:registrar_metadata(Key, Entry, MetadatosLimpios)};
-        false ->
-            {MapLimpio, MetadatosLimpios}
+            NuevosRecientes = registrar_escritura(Alfa, Clave, Entrada, Recientes),
+            case hay_lugar(Clave, Alfa, Valores) of
+                true ->
+                    aplicar(Clave, Entrada, Valores, Metadatos, NuevosRecientes);
+                false ->
+                    case candidato_vencido(elegibles(Valores, NuevosRecientes)) of
+                        ninguno ->
+                            {Valores, Metadatos, Recientes};
+                        {Victima, Valor} ->
+                            {Reducido, Meta} = desalojar([], Victima, Valor, Valores, Metadatos),
+                            aplicar(Clave, Entrada, Reducido, Meta, NuevosRecientes)
+                    end
+            end
     end;
-aceptar_oferta(_Key, _Entry, _Alfa, Map, Metadatos) ->
-    {Map, Metadatos}.
+aceptar_oferta(_Clave, _Entrada, _Alfa, Valores, Metadatos, Recientes) ->
+    {Valores, Metadatos, Recientes}.
 
-%% ---------------------------------------------------------------------
-%% Auxiliares
-%% ---------------------------------------------------------------------
+%% El ranking conserva hasta ceil(0,75 * Alfa) versiones de escritura.
+%% Un borrado libera la plaza y conserva la escritura en el ranking histórico.
+registrar_escritura(Alfa, Clave, {Version, _}, Recientes) ->
+    case maps:find(Clave, Recientes) of
+        {ok, Actual} when Actual >= Version ->
+            Recientes;
+        _ ->
+            Nuevos = maps:put(Clave, Version, Recientes),
+            case map_size(Nuevos) > (3 * Alfa + 3) div 4 of
+                false -> Nuevos;
+                true ->
+                    {_, Primera} = lists:min([{V, K} || {K, V} <- maps:to_list(Nuevos)]),
+                    maps:remove(Primera, Nuevos)
+            end
+    end.
 
-%% El valor de menor version: el escrito hace mas tiempo.
--spec candidato_a_desalojar(valores()) -> ninguno | {term(), entry()}.
-candidato_a_desalojar(Valores) when is_map(Valores) ->
+hay_lugar(Clave, Alfa, Valores) ->
+    maps:is_key(Clave, Valores) orelse map_size(Valores) < Alfa.
+
+elegibles(Valores, Recientes) ->
+    maps:without(maps:keys(Recientes), Valores).
+
+elegir_descarte(Candidatos) ->
+    case candidato_vencido(Candidatos) of
+        ninguno -> entrada_mas_antigua(Candidatos);
+        Vencido -> Vencido
+    end.
+
+candidato_vencido(Valores) ->
+    Vencidos = maps:filter(
+        fun(_Clave, {_, {valor, _, Vence}}) -> not simple_kv_ttl:vigente(Vence) end,
+        Valores),
+    entrada_mas_antigua(Vencidos).
+
+-spec entrada_mas_antigua(valores()) -> ninguno | {term(), entrada()}.
+entrada_mas_antigua(Valores) when is_map(Valores) ->
     maps:fold(
         fun
-            (Key, Entry, ninguno) ->
-                {Key, Entry};
-            (Key, {Version, _} = Entry, {_KeyAcc, {VersionAcc, _}}) when Version < VersionAcc ->
-                {Key, Entry};
-            (_Key, _Entry, Acc) ->
+            (Clave, Entrada, ninguno) ->
+                {Clave, Entrada};
+            (Clave, {Version, _} = Entrada, {_, {VersionAcc, _}}) when Version < VersionAcc ->
+                {Clave, Entrada};
+            (_Clave, _Entrada, Acc) ->
                 Acc
         end,
         ninguno,
         Valores
     ).
 
-%% Saca el valor del Map y deja la marca 'desalojado' con SU MISMA version.
--spec desalojar(term(), valores(), metadatos()) -> {valores(), metadatos()}.
-desalojar(Key, Map, Metadatos) -> 
-    {ok, {Version, _Contenido}} = maps:find(Key, Map),
-    NuevoMap = maps:remove(Key, Map),
-    NuevosMetadatos = maps:put(Key, {Version, desalojado}, Metadatos),
-    {NuevoMap, NuevosMetadatos}.
+desalojar(Pares, Clave, {Version, {valor, _, Vence}} = Entrada, Valores, Metadatos) ->
+    case simple_kv_ttl:vigente(Vence) of
+        true -> simple_kv_replicacion:ofrecer(Pares, Clave, Entrada);
+        false -> ok
+    end,
+    {maps:remove(Clave, Valores), maps:put(Clave, {Version, desalojado}, Metadatos)}.
 
-%% Un valor vencido sale del Map y queda como 'borrado' con su misma
-%% version: ya no existe para nadie y un put viejo atrasado no lo revive.
--spec limpiar_vencidos(valores(), metadatos()) -> {valores(), metadatos()}.
-limpiar_vencidos(Map, Metadatos) ->
-    maps:fold(
-        fun(Key, {Version, {value, _Val, Vence}}, {M, Meta}) ->
-            case simple_kv_ttl:vigente(Vence) of
-                true -> {M, Meta};
-                false -> {maps:remove(Key, M), maps:put(Key, {Version, borrado}, Meta)}
-            end
-        end,
-        {Map, Metadatos},
-        Map
-    ).
+aplicar(Clave, Entrada, Valores, Metadatos, Recientes) ->
+    {simple_kv_almacen:aplicar_actualizacion(Clave, Entrada, Valores, Metadatos),
+     simple_kv_almacen:registrar_metadatos(Clave, Entrada, Metadatos),
+     Recientes}.
