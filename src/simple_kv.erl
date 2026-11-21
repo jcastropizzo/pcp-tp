@@ -14,11 +14,7 @@ put(Pid, Clave, Valor) ->
 put(Pid, Clave, Valor, TTL) when
     is_integer(TTL), TTL >= 0; TTL =:= infinity
 ->
-    RefCliente = make_ref(),
-    Pid ! {put, self(), RefCliente, Clave, Valor, TTL},
-    receive
-        {RefCliente, ok} -> ok
-    end.
+    cambiar(Pid, Clave, {put, Valor, TTL}).
 
 get(Pid, Clave) ->
     RefCliente = make_ref(),
@@ -29,11 +25,16 @@ get(Pid, Clave) ->
     end.
 
 delete(Pid, Clave) ->
-    RefCliente = make_ref(),
-    Pid ! {delete, self(), RefCliente, Clave},
+    cambiar(Pid, Clave, borrado).
+
+cambiar(Pid, Clave, Cambio) ->
+    Ref = make_ref(),
+    Pid ! {pedir_cupo, self(), Ref, Clave},
     receive
-        {RefCliente, ok} -> ok
-    end.
+        {Ref, permiso, Reserva, Id} ->
+            Pid ! {cambiar, self(), Ref, Clave, Reserva, Id, Cambio}
+    end,
+    receive {Ref, ok} -> ok end.
 
 start_link(Cantidad, Alfa) when
     is_integer(Cantidad), Cantidad >= 1, is_integer(Alfa), Alfa >= 3
@@ -42,8 +43,9 @@ start_link(Cantidad, Alfa) when
         fun(_) -> spawn_link(fun() -> simple_kv_replica:init() end) end,
         lists:seq(1, Cantidad)
     ),
+    Cupos = spawn_link(fun() -> simple_kv_cupos:init(Pids, Alfa) end),
     lists:foreach(
-        fun(Pid) -> Pid ! {configurar, lists:delete(Pid, Pids), Alfa} end,
+        fun(Pid) -> Pid ! {configurar, lists:delete(Pid, Pids), Alfa, Cupos} end,
         Pids
     ),
     {ok, Pids}.

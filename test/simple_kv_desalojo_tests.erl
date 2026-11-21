@@ -1,99 +1,71 @@
 -module(simple_kv_desalojo_tests).
 -include_lib("eunit/include/eunit.hrl").
--import(simple_kv_test_utils, [replica_con_par_falso/1, escribir/2, lecturas/2,
-                              consultar_local/2, get_async/2, esperar_get/1,
-                              esperar_consulta/1, responder_consulta/3]).
 
-%% Con todos los valores vigentes, la réplica ofrece el de menor versión.
+%% La decisión de desalojo devuelve una oferta del valor vigente más antiguo.
 desalojo_ofrece_el_valor_test() ->
-    Rep = replica_con_par_falso(3),
-    escribir(Rep, [1, 2, 3, 4]),
-    receive
-        {ofrecer, Clave, {_Version, {valor, Valor, _Vence}}} ->
-            ?assertEqual(1, Clave),
-            ?assertEqual(1, Valor)
-    after 1000 ->
-        erlang:error(sin_oferta)
-    end,
-    ok = simple_kv:stop([Rep]).
+    Estado = llenar(3, [1, 2, 3]),
+    {{V, _, _}, {1, _, {_, {valor, 1, infinity}}}} =
+        guardar(3, 4, entrada(4, infinity), Estado),
+    ?assertEqual([2, 3, 4], lists:sort(maps:keys(V))).
 
-%% Con lugar libre, la oferta se acepta y queda disponible localmente.
 oferta_aceptada_con_lugar_test() ->
-    Rep = replica_con_par_falso(3),
-    Entrada = {simple_kv_replicacion:nueva_version(), {valor, ofrecido, infinity}},
-    Rep ! {ofrecer, k, Entrada},
-    ?assertEqual({ok, ofrecido}, simple_kv:get(Rep, k)),
-    ok = simple_kv:stop([Rep]).
+    {{V, _, _}, Entrada} = ofrecer(3, k, ofrecido, {#{}, #{}, #{}}),
+    ?assertEqual(#{k => Entrada}, V).
 
-%% Un mapa lleno de valores vigentes conserva sus entradas al recibir una oferta.
 oferta_rechazada_sin_lugar_test() ->
-    Rep = replica_con_par_falso(3),
-    escribir(Rep, [1, 2, 3]),
-    Entrada = {simple_kv_replicacion:nueva_version(), {valor, ofrecido, infinity}},
-    Rep ! {ofrecer, k, Entrada},
-    %% como no la guardo, el get de k tiene que consultar al par
-    ok = get_async(Rep, k),
-    {Rep, RefConsulta} = esperar_consulta(k),
-    ok = responder_consulta(Rep, RefConsulta, error),
-    ?assertEqual(not_found, esperar_get(k)),
-    %% los valores que tenia siguen estando
-    lists:foreach(fun(N) -> ?assertEqual({ok, N}, simple_kv:get(Rep, N)) end, [1, 2, 3]),
-    ok = simple_kv:stop([Rep]).
+    Estado = llenar(3, [1, 2, 3]),
+    ?assertEqual(Estado, element(1, ofrecer(3, k, ofrecido, Estado))).
 
-%% Una oferta con version vieja no pisa un valor mas nuevo.
 oferta_vieja_no_pisa_valor_nuevo_test() ->
-    Rep = replica_con_par_falso(3),
-    VersionVieja = simple_kv_replicacion:nueva_version(),
-    ok = simple_kv:put(Rep, k, nuevo),
-    Rep ! {ofrecer, k, {VersionVieja, {valor, viejo, infinity}}},
-    ?assertEqual({ok, nuevo}, simple_kv:get(Rep, k)),
-    ok = simple_kv:stop([Rep]).
+    Vieja = entrada(viejo, infinity),
+    {Estado, _} = guardar(3, k, entrada(nuevo, infinity), {#{}, #{}, #{}}),
+    ?assertEqual(Estado, aceptar(3, k, Vieja, Estado)).
 
-%% La marca de borrado impide que una oferta antigua recupere el valor.
 oferta_vieja_no_revive_borrado_test() ->
-    Rep = replica_con_par_falso(3),
-    VersionVieja = simple_kv_replicacion:nueva_version(),
-    ok = simple_kv:put(Rep, k, v),
-    ok = simple_kv:delete(Rep, k),
-    Rep ! {ofrecer, k, {VersionVieja, {valor, v, infinity}}},
-    ?assertEqual(not_found, simple_kv:get(Rep, k)),
-    ok = simple_kv:stop([Rep]).
+    Vieja = entrada(v, infinity),
+    Borrado = {simple_kv_replicacion:nueva_version(), borrado},
+    Meta = simple_kv_almacen:registrar_metadatos(k, make_ref(), Borrado, #{}),
+    Estado = {#{}, Meta, #{}},
+    ?assertEqual(Estado, aceptar(3, k, Vieja, Estado)).
 
-%% Un vencido que sale del mapa no se ofrece al par.
 no_se_ofrece_un_vencido_al_desalojarlo_test() ->
-    P = spawn_link(fun simple_kv_replica:init/0),
-    P ! {configurar, [self()], 3},
-    try
-        ok = simple_kv:put(P, vencido, descartado, 0),
-        escribir(P, [a, b, c]),
-        ?assertNotMatch({ok, {_, {valor, _, _}}}, consultar_local(P, vencido)),
-        receive
-            {ofrecer, vencido, Entrada} -> error({ofrecio_vencido, Entrada})
-        after 0 -> ok
-        end
-    after
-        simple_kv:stop([P])
-    end.
+    E0 = {#{}, #{}, #{}},
+    {E1, ninguna} = guardar(3, vencido, entrada(descartado, 0), E0),
+    {E2, ninguna} = guardar(3, a, entrada(a, infinity), E1),
+    {E3, ninguna} = guardar(3, b, entrada(b, infinity), E2),
+    {{V, M, _}, ninguna} = guardar(3, c, entrada(c, infinity), E3),
+    ?assertNot(maps:is_key(vencido, V)),
+    ?assertMatch({_, desalojado, _}, maps:get(vencido, M)).
 
-%% Una oferta puede reutilizar un vencido elegible, sin desalojar vigentes ni reenviar ofertas.
 oferta_reutiliza_vencido_elegible_test() ->
-    P = spawn_link(fun simple_kv_replica:init/0),
-    P ! {configurar, [self()], 4},
-    try
-        Inicio = simple_kv_replicacion:nueva_version(),
-        escribir(P, [a]),
-        ok = simple_kv:put(P, b, vencido, 0),
-        escribir(P, [c, d]),
-        P ! {ofrecer, e, {simple_kv_replicacion:nueva_version(), {valor, e, infinity}}},
-        ?assertMatch({ok, {_, desalojado}}, consultar_local(P, b)),
-        P ! {ofrecer, f, {simple_kv_replicacion:nueva_version(), {valor, f, infinity}}},
-        ?assertEqual(error, consultar_local(P, f)),
-        ?assertEqual([{ok, K} || K <- [a, c, d, e]], lecturas(P, [a, c, d, e])),
-        receive
-            {ofrecer, K, {Version, _} = Entrada} when Version > Inicio ->
-                error({oferta_reenviada, K, Entrada})
-        after 0 -> ok
-        end
-    after
-        simple_kv:stop([P])
-    end.
+    E0 = llenar(4, [a]),
+    {E1, ninguna} = guardar(4, b, entrada(vencido, 0), E0),
+    {E2, ninguna} = guardar(4, c, entrada(c, infinity), E1),
+    {E3, ninguna} = guardar(4, d, entrada(d, infinity), E2),
+    {{V, M, _} = E4, _} = ofrecer(4, e, e, E3),
+    ?assertMatch({_, desalojado, _}, maps:get(b, M)),
+    ?assertEqual([a, c, d, e], lists:sort(maps:keys(V))),
+    ?assertEqual(E4, element(1, ofrecer(4, f, f, E4))).
+
+llenar(Alfa, Claves) ->
+    lists:foldl(fun(K, Estado) ->
+        {Nuevo, ninguna} = guardar(Alfa, K, entrada(K, infinity), Estado),
+        Nuevo
+    end, {#{}, #{}, #{}}, Claves).
+
+guardar(Alfa, K, Entrada, {V, M, R}) ->
+    simple_kv_capacidad:guardar(Alfa, K, reserva(K, M), Entrada, V, {M, R}).
+
+ofrecer(Alfa, K, Valor, Estado) ->
+    Entrada = entrada(Valor, infinity),
+    {aceptar(Alfa, K, Entrada, Estado), Entrada}.
+
+aceptar(Alfa, K, Entrada, {V, M, R}) ->
+    simple_kv_capacidad:aceptar_oferta(Alfa, K, reserva(K, M), Entrada, V, {M, R}).
+
+reserva(K, M) ->
+    case maps:find(K, M) of {ok, {_, _, R}} -> R; error -> make_ref() end.
+
+entrada(Valor, TTL) ->
+    {simple_kv_replicacion:nueva_version(),
+     {valor, Valor, simple_kv_ttl:calcular_vencimiento(TTL)}}.

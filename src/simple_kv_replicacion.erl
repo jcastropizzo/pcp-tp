@@ -1,16 +1,21 @@
 -module(simple_kv_replicacion).
--export([nueva_version/0, replicar/3, ofrecer/3, elegir_mayor/2]).
+-export([nueva_version/0, replicar/5, ofrecer/3, elegir_mayor/2]).
 
 nueva_version() ->
     erlang:unique_integer([monotonic]).
 
 %% La propagación es asincrónica: el origen no espera confirmaciones.
-replicar(Pares, Clave, Entrada) ->
-    lists:foreach(fun(Pid) -> Pid ! {replicar, Clave, Entrada} end, Pares).
+replicar(Pares, Clave, Reserva, Id, Entrada) ->
+    lists:foreach(fun(Pid) -> Pid ! {replicar, Clave, Reserva, Id, Entrada} end, Pares).
 
-%% Cada par decide si conserva el valor que se está desalojando (§4.7).
-ofrecer(Pares, Clave, Entrada) ->
-    lists:foreach(fun(Pid) -> Pid ! {ofrecer, Clave, Entrada} end, Pares).
+%% El informe de aplicación incluye una referencia por destinatario.
+ofrecer(_Pares, _Id, ninguna) -> [];
+ofrecer(Pares, Id, {Clave, Reserva, Entrada}) ->
+    lists:map(fun(Pid) ->
+        Ref = make_ref(),
+        Pid ! {ofrecer, Clave, Reserva, Id, Ref, Entrada},
+        {Ref, Clave}
+    end, Pares).
 
 elegir_mayor(error, Otra) ->
     Otra;

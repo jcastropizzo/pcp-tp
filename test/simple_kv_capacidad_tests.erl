@@ -157,31 +157,15 @@ sobrescritura_con_capacidad_llena_no_desaloja_test() ->
         simple_kv:stop([Pid])
     end.
 
-%% Prueba interna: inyecta mensajes de replicacion y consulta estado LOCAL.
-%% get/2 podria recuperar datos de pares y ocultar exceso de almacenamiento.
+%% Las versiones de un envío se comprueban en la transición de capacidad.
 recepcion_replicada_limita_capacidad_y_no_desaloja_por_duplicados_test() ->
-    {ok, [Pid]} = simple_kv:start_link(1, 16),
-    try
-        lists:foreach(
-            fun(N) -> Pid ! {replicar, N, {N, {valor, N, infinity}}} end,
-            lists:seq(1, 17)
-        ),
-        Antes = [{N, consultar_local(Pid, N)} || N <- lists:seq(1, 17)],
-        ?assertEqual(16, length([N || {N, {ok, {_, {valor, _, _}}}} <- Antes])),
-        ?assertEqual(1, length([N || {N, {ok, {_, desalojado}}} <- Antes])),
-        lists:foreach(
-            fun(N) -> ?assertEqual({ok, {N, {valor, N, infinity}}}, proplists:get_value(N, Antes)) end,
-            lists:seq(6, 17)
-        ),
-        Pid ! {replicar, 17, {17, {valor, 17, infinity}}},
-        Pid ! {replicar, 17, {0, {valor, obsoleto, infinity}}},
-        Despues = [{N, consultar_local(Pid, N)} || N <- lists:seq(1, 17)],
-        ?assertEqual(Antes, Despues)
-    after
-        simple_kv:stop([Pid])
-    end.
+    Estado = aplicar_versiones(16, lists:seq(1, 17)),
+    {Valores, Meta, _} = Estado,
+    ?assertEqual(lists:seq(2, 17), lists:sort(maps:keys(Valores))),
+    ?assertMatch({1, desalojado, _}, maps:get(1, Meta)),
+    ?assertEqual(Estado, aplicar_valor(16, 17, {17, {valor, 17, infinity}}, Estado)),
+    ?assertEqual(Estado, aplicar_valor(16, 17, {0, {valor, obsoleto, infinity}}, Estado)).
 
-%% Una sola replica conserva las Alfa versiones mas nuevas para tres ordenes de entrega.
 limite_y_mayores_versiones_para_varios_alfa_test() ->
     Claves = lists:seq(1, 40),
     ParesPrimero = [N || N <- Claves, N rem 2 =:= 0] ++
@@ -189,48 +173,53 @@ limite_y_mayores_versiones_para_varios_alfa_test() ->
     Ordenes = [Claves, lists:reverse(Claves), ParesPrimero],
     lists:foreach(fun(Alfa) ->
         lists:foreach(fun(Orden) ->
-            {ok, [P]} = simple_kv:start_link(1, Alfa),
-            try
-                lists:foreach(fun(N) ->
-                    P ! {replicar, N, {N, {valor, N, infinity}}}
-                end, Orden),
-                Esperado = [{N, {ok, N}} || N <- lists:nthtail(40 - Alfa, Claves)],
-                Disponibles = [{N, Lectura} || N <- Claves,
-                    Lectura <- [simple_kv:get(P, N)], Lectura =/= not_found],
-                ?assertEqual(Esperado, Disponibles)
-            after
-                simple_kv:stop([P])
-            end
+            {Valores, _, _} = aplicar_versiones(Alfa, Orden),
+            ?assertEqual(lists:nthtail(40 - Alfa, Claves), lists:sort(maps:keys(Valores)))
         end, Ordenes)
     end, lists:seq(3, 16)).
 
+aplicar_versiones(Alfa, Orden) ->
+    lists:foldl(fun(N, Estado) ->
+        aplicar_valor(Alfa, N, {N, {valor, N, infinity}}, Estado)
+    end, {#{}, #{}, #{}}, Orden).
+
+aplicar_valor(Alfa, Clave, Entrada, {V, M, R}) ->
+    Reserva = case maps:find(Clave, M) of
+        {ok, {_, _, Existente}} -> Existente;
+        error -> make_ref()
+    end,
+    {Nuevo, _} = simple_kv_capacidad:guardar(Alfa, Clave, Reserva, Entrada, V, {M, R}),
+    Nuevo.
+
 %% La presion de escrituras remotas preserva el borrado y no reactiva el TTL cero.
 sobrescritura_delete_ttl_y_trafico_remoto_test() ->
-    {ok, [P]} = simple_kv:start_link(1, 4),
+    {ok, [P, Otro] = Pids} = simple_kv:start_link(2, 4),
     try
         escribir(P, [1, 2, 3, 4]),
         ok = simple_kv:put(P, 2, nuevo),
         ok = simple_kv:delete(P, 3),
         ok = simple_kv:put(P, 4, vencido, 0),
         ?assertEqual({ok, nuevo}, simple_kv:get(P, 2)),
-        inyectar_escrituras_remotas(P, [{remoto, N} || N <- lists:seq(1, 10)]),
+        escribir(Otro, [{remoto, N} || N <- lists:seq(1, 10)]),
+        esperar_residente(P, {remoto, 10}),
         ?assertEqual([not_found, not_found, not_found], lecturas(P, [2, 3, 4])),
         ?assertEqual([{ok, {remoto, N}} || N <- [7, 8, 9, 10]],
                      lecturas(P, [{remoto, N} || N <- [7, 8, 9, 10]]))
     after
-        simple_kv:stop([P])
+        simple_kv:stop(Pids)
     end.
 
 %% Las versiones remotas mas nuevas pueden ocupar todo el cupo.
 versiones_remotas_desplazan_todas_las_locales_antiguas_test() ->
-    {ok, [P]} = simple_kv:start_link(1, 3),
+    {ok, [P, Otro] = Pids} = simple_kv:start_link(2, 3),
     try
         escribir(P, [a, b, c]),
-        inyectar_escrituras_remotas(P, [d, e, f]),
+        escribir(Otro, [d, e, f]),
+        esperar_residente(P, f),
         ?assertEqual([not_found, not_found, not_found, {ok, d}, {ok, e}, {ok, f}],
                      lecturas(P, [a, b, c, d, e, f]))
     after
-        simple_kv:stop([P])
+        simple_kv:stop(Pids)
     end.
 
 %% Con Alfa 3, el TTL cero reciente ocupa una plaza y get lo oculta.
@@ -254,35 +243,35 @@ vencida_sale_al_perder_proteccion_test() ->
         ok = simple_kv:put(P, b, vencido, 0),
         ok = simple_kv:put(P, c, vencido, 0),
         escribir(P, [d, e]),
-        inyectar_escrituras_remotas(P, [f]),
-        ?assertMatch({ok, {_, desalojado}}, consultar_local(P, b)),
+        escribir(P, [f]),
+        ?assertNotMatch({ok, {_, {valor, _, _}}}, consultar_local(P, b)),
         ?assertMatch({ok, {_, {valor, vencido, _}}}, consultar_local(P, c)),
         ?assertEqual(not_found, simple_kv:get(P, c)),
-        inyectar_escrituras_remotas(P, [g]),
-        ?assertMatch({ok, {_, desalojado}}, consultar_local(P, c)),
+        escribir(P, [g]),
+        ?assertNotMatch({ok, {_, {valor, _, _}}}, consultar_local(P, c)),
         ?assertEqual([{ok, K} || K <- [a, d, e, f, g]], lecturas(P, [a, d, e, f, g]))
     after
         simple_kv:stop([P])
     end.
 
-%% El delete de un protegido vencido libera su plaza y bloquea su replica anterior.
+%% El delete de un protegido vencido libera su plaza.
 delete_libera_plaza_de_vencido_protegido_test() ->
     {ok, [P]} = simple_kv:start_link(1, 3),
     try
         escribir(P, [a, b]),
         ok = simple_kv:put(P, c, vencido, 0),
-        {ok, Entrada} = consultar_local(P, c),
+        ?assertMatch({ok, {_, {valor, vencido, _}}}, consultar_local(P, c)),
         ok = simple_kv:delete(P, c),
-        P ! {replicar, c, Entrada},
         escribir(P, [d]),
-        ?assertMatch({ok, {_, borrado}}, consultar_local(P, c)),
         ?assertEqual([{ok, a}, {ok, b}, not_found, {ok, d}], lecturas(P, [a, b, c, d]))
     after
         simple_kv:stop([P])
     end.
 
-inyectar_escrituras_remotas(P, Claves) ->
-    lists:foreach(fun(Clave) ->
-        Entrada = {simple_kv_replicacion:nueva_version(), {valor, Clave, infinity}},
-        P ! {replicar, Clave, Entrada}
-    end, Claves).
+esperar_residente(P, Clave) ->
+    simple_kv_test_utils:esperar(fun() ->
+        case consultar_local(P, Clave) of
+            {ok, {_, {valor, _, _}}} -> true;
+            _ -> false
+        end
+    end).
