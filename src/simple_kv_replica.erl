@@ -1,91 +1,134 @@
 -module(simple_kv_replica).
 -export([init/0]).
 
-%% Estado de la réplica en los argumentos de loop/6.
-%%   Pares      : pids de las otras réplicas
-%%   Alfa       : capacidad máxima de valores (§4.7)
-%%   Valores        : Clave => {Version, {valor, Valor, Vence}}      (solo valores)
-%%   Metadatos  : Clave => {Version, valor | borrado | desalojado}
-%%   Recientes  : Clave => versión de la escritura protegida (§4.7)
-%%   Pendientes : RefConsulta => {Cliente, RefCliente, Clave, Faltan, Mejor}  (lecturas en curso, §4.8)
+-record(replica, {
+    pares, alfa, cupos,
+    valores = #{}, metadatos = #{}, recientes = #{},
+    pendientes = #{}, cierres = #{}
+}).
 
 init() ->
     receive
-        {configurar, Pares, Alfa} -> loop(Pares, Alfa, #{}, #{}, #{}, #{})
+        {configurar, Pares, Alfa, Cupos} ->
+            loop(#replica{pares = Pares, alfa = Alfa, cupos = Cupos})
     end.
 
-loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
+loop(#replica{pares = Pares, alfa = Alfa, cupos = Cupos, valores = Valores,
+              metadatos = Meta, recientes = Recientes, pendientes = Pendientes,
+              cierres = Cierres} = Estado) ->
     receive
-        %% La respuesta local permite que los pares se consulten entre sí sin bloquearse.
+        {pedir_cupo, Cliente, Ref, Clave} ->
+            Cupos ! {pedir_cupo, Cliente, Ref, Clave},
+            loop(Estado);
+
+        {cambiar, Cliente, Ref, Clave, Reserva, Id, Cambio} ->
+            Entrada = {simple_kv_replicacion:nueva_version(), contenido(Cambio)},
+            Nuevo = aplicar(Clave, Reserva, Id, Entrada, Estado),
+            Cliente ! {Ref, ok},
+            simple_kv_replicacion:replicar(Pares, Clave, Reserva, Id, Entrada),
+            loop(Nuevo);
+
+        {replicar, Clave, Reserva, Id, Entrada} ->
+            loop(aplicar(Clave, Reserva, Id, Entrada, Estado));
+
+        {ofrecer, Clave, Reserva, Id, Ref, Entrada} ->
+            {V, M, R} = simple_kv_capacidad:aceptar_oferta(
+                Alfa, Clave, Reserva, Entrada, Valores, {Meta, Recientes}),
+            {Altas, Bajas} = cambios_de_residencia(Valores, V),
+            Cupos ! {oferta_resuelta, Id, Ref, self(), Altas, Bajas},
+            loop(Estado#replica{valores = V, metadatos = M, recientes = R});
+
+        {get, Cliente, Ref, Clave} ->
+            loop(leer(Cliente, Ref, Clave, Estado));
+
+        %% Las consultas de pares siguen atendidas durante el olvido.
         {consultar, Solicitante, RefConsulta, Clave} ->
             Solicitante !
                 {respuesta_consulta, RefConsulta, self(),
-                 simple_kv_almacen:buscar_local(Clave, Valores, Metadatos)},
-            loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
-
-        stop ->
-            ok;
-
-        {put, Cliente, RefCliente, Clave, Valor, TTL} ->
-            Entrada = {simple_kv_replicacion:nueva_version(),
-                     {valor, Valor, simple_kv_ttl:calcular_vencimiento(TTL)}},
-            {NuevosValores, NuevosMetadatos, NuevosRecientes} =
-                simple_kv_capacidad:guardar(Pares, Alfa, Clave, Entrada, Valores, {Metadatos, Recientes}),
-            Cliente ! {RefCliente, ok},
-            simple_kv_replicacion:replicar(Pares, Clave, Entrada),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
-
-        {delete, Cliente, RefCliente, Clave} ->
-            Entrada = {simple_kv_replicacion:nueva_version(), borrado},
-            NuevosMetadatos = simple_kv_almacen:registrar_metadatos(Clave, Entrada, Metadatos),
-            NuevosValores = maps:remove(Clave, Valores),
-            Cliente ! {RefCliente, ok},
-            simple_kv_replicacion:replicar(Pares, Clave, Entrada),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, Recientes, Pendientes);
-
-        {get, Cliente, RefCliente, Clave} ->
-            Local = simple_kv_almacen:buscar_local(Clave, Valores, Metadatos),
-            case Local of
-                {ok, {_Version, {valor, _Valor, _Vence}}} ->
-                    responder_lectura(Cliente, RefCliente, Local),
-                    loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
-                {ok, {_Version, borrado}} ->
-                    responder_lectura(Cliente, RefCliente, Local),
-                    loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
-                _ when Pares =:= [] ->
-                    responder_lectura(Cliente, RefCliente, Local),
-                    loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
-                _ ->
-                    NuevosPendientes =
-                        consultar_pares(Pares, Cliente, RefCliente, Clave, Local, Pendientes),
-                    loop(Pares, Alfa, Valores, Metadatos, Recientes, NuevosPendientes)
-            end;
-
-        {replicar, Clave, {_Version, borrado} = Entrada} ->
-            NuevosValores = simple_kv_almacen:aplicar_actualizacion(Clave, Entrada, Valores, Metadatos),
-            NuevosMetadatos = simple_kv_almacen:registrar_metadatos(Clave, Entrada, Metadatos),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, Recientes, Pendientes);
-        {replicar, Clave, {_Version, {valor, _, _}} = Entrada} ->
-            {NuevosValores, NuevosMetadatos, NuevosRecientes} =
-                simple_kv_capacidad:guardar(Pares, Alfa, Clave, Entrada, Valores, {Metadatos, Recientes}),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
-
-        {ofrecer, Clave, Entrada} ->
-            {NuevosValores, NuevosMetadatos, NuevosRecientes} =
-                simple_kv_capacidad:aceptar_oferta(Clave, Entrada, Alfa, Valores, Metadatos, Recientes),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
+                 simple_kv_almacen:buscar_local(Clave, Valores, Meta)},
+            loop(Estado);
 
         {respuesta_consulta, RefConsulta, Par, Resultado} ->
-            {NuevosPendientes, Respuesta} =
-                procesar_respuesta_consulta(RefConsulta, Par, Resultado, Valores, Metadatos, Pendientes),
+            {Nuevos, Respuesta} =
+                procesar_respuesta_consulta(RefConsulta, Par, Resultado, Valores, Meta, Pendientes),
             case Respuesta of
                 sin_respuesta -> ok;
-                {Cliente, RefCliente, Final} -> responder_lectura(Cliente, RefCliente, Final)
+                {Cliente, Ref, Final} ->
+                    responder_lectura(Cliente, Ref, Final),
+                    {_, _, Clave, _, _} = maps:get(RefConsulta, Pendientes),
+                    avisar_si_drenada(Clave, Cierres, Nuevos, Cupos)
             end,
-            loop(Pares, Alfa, Valores, Metadatos, Recientes, NuevosPendientes);
+            loop(Estado#replica{pendientes = Nuevos});
+
+        {preparar_olvido, Clave, Reserva} ->
+            Nuevos = Cierres#{Clave => Reserva},
+            avisar_si_drenada(Clave, Nuevos, Pendientes, Cupos),
+            loop(Estado#replica{cierres = Nuevos});
+
+        {olvidar, Clave, Reserva} when map_get(Clave, Cierres) =:= Reserva ->
+            Reducidos = case maps:find(Clave, Meta) of
+                {ok, {_, _, Reserva}} -> maps:remove(Clave, Meta);
+                _ -> Meta
+            end,
+            Cupos ! {olvidada, Clave, Reserva, self()},
+            loop(Estado#replica{metadatos = Reducidos, cierres = maps:remove(Clave, Cierres)});
+
+        stop ->
+            simple_kv_cupos:detener_replica(Cupos);
 
         _ ->
-            loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes)
+            loop(Estado)
+    end.
+
+contenido(borrado) -> borrado;
+contenido({put, Valor, TTL}) -> {valor, Valor, simple_kv_ttl:calcular_vencimiento(TTL)}.
+
+aplicar(Clave, Reserva, Id, Entrada,
+        #replica{pares = Pares, alfa = Alfa, cupos = Cupos, valores = Valores,
+                 metadatos = Meta, recientes = Recientes} = Estado) ->
+    {{V, M, R}, Oferta} = case Entrada of
+        {_, borrado} ->
+            Borrados = simple_kv_almacen:aplicar_actualizacion(Clave, Entrada, Valores, Meta),
+            Marcados = simple_kv_almacen:registrar_metadatos(Clave, Reserva, Entrada, Meta),
+            {{Borrados, Marcados, Recientes}, ninguna};
+        {_, {valor, _, _}} ->
+            simple_kv_capacidad:guardar(Alfa, Clave, Reserva, Entrada, Valores, {Meta, Recientes})
+    end,
+    Ofertas = simple_kv_replicacion:ofrecer(Pares, Id, Oferta),
+    {Altas, Bajas} = cambios_de_residencia(Valores, V),
+    Cupos ! {aplicado, Id, self(), Altas, Bajas, Ofertas},
+    Estado#replica{valores = V, metadatos = M, recientes = R}.
+
+cambios_de_residencia(Antes, Despues) ->
+    {[K || K <- maps:keys(Despues), not is_map_key(K, Antes)],
+     [K || K <- maps:keys(Antes), not is_map_key(K, Despues)]}.
+
+leer(Cliente, Ref, Clave, #replica{cierres = Cierres} = Estado)
+        when is_map_key(Clave, Cierres) ->
+    %% El coordinador ya confirmó que no hay copias ni cambios de esta clave.
+    responder_lectura(Cliente, Ref, error),
+    Estado;
+leer(Cliente, Ref, Clave,
+     #replica{pares = Pares, valores = Valores, metadatos = Meta,
+              pendientes = Pendientes} = Estado) ->
+    Local = simple_kv_almacen:buscar_local(Clave, Valores, Meta),
+    case Local of
+        {ok, {_, {valor, _, _}}} -> responder_lectura(Cliente, Ref, Local), Estado;
+        {ok, {_, borrado}} -> responder_lectura(Cliente, Ref, Local), Estado;
+        _ when Pares =:= [] -> responder_lectura(Cliente, Ref, Local), Estado;
+        _ ->
+            Nuevos = consultar_pares(Pares, Cliente, Ref, Clave, Local, Pendientes),
+            Estado#replica{pendientes = Nuevos}
+    end.
+
+avisar_si_drenada(Clave, Cierres, Pendientes, Cupos) ->
+    case maps:find(Clave, Cierres) of
+        {ok, Reserva} ->
+            case lists:any(fun({_, _, K, _, _}) -> K =:= Clave end, maps:values(Pendientes)) of
+                true -> ok;
+                false -> Cupos ! {lecturas_drenadas, Clave, Reserva, self()}
+            end;
+        error -> ok
     end.
 
 consultar_pares(Pares, Cliente, RefCliente, Clave, Local, Pendientes) ->

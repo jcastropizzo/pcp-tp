@@ -1,37 +1,37 @@
 -module(simple_kv_almacen).
--export([buscar_local/3, registrar_metadatos/3, aplicar_actualizacion/4, version_no_obsoleta/3]).
+-export([buscar_local/3, registrar_metadatos/4, aplicar_actualizacion/4, version_no_obsoleta/3]).
 
 buscar_local(Clave, Valores, Metadatos) ->
     case maps:find(Clave, Metadatos) of
-        {ok, {Version, borrado}} ->
+        {ok, {Version, borrado, _}} ->
             {ok, {Version, borrado}};
-        {ok, {Version, desalojado}} ->
+        {ok, {Version, desalojado, _}} ->
             {ok, {Version, desalojado}};
-        {ok, {_Version, valor}} ->
+        {ok, {_Version, valor, _}} ->
             maps:find(Clave, Valores);
         error ->
             error
     end.
 
-registrar_metadatos(Clave, {Version, Contenido}, Metadatos) ->
+registrar_metadatos(Clave, Reserva, {Version, Contenido}, Metadatos) ->
     Estado =
         case Contenido of
             borrado -> borrado;
             {valor, _, _} -> valor
         end,
     case maps:find(Clave, Metadatos) of
-        {ok, {Version, desalojado}} when Estado =:= valor ->
-            maps:put(Clave, {Version, valor}, Metadatos);
-        {ok, {Actual, _}} when Actual >= Version ->
+        {ok, {Version, desalojado, _}} when Estado =:= valor ->
+            maps:put(Clave, {Version, valor, Reserva}, Metadatos);
+        {ok, {Actual, _, _}} when Actual >= Version ->
             Metadatos;
         _ ->
-            maps:put(Clave, {Version, Estado}, Metadatos)
+            maps:put(Clave, {Version, Estado, Reserva}, Metadatos)
     end.
 
 %% Una marca conserva la versión aunque el valor haya salido del mapa.
 aplicar_actualizacion(Clave, {VersionNueva, Contenido} = Nueva, Valores, Metadatos) ->
     case maps:find(Clave, Metadatos) of
-        {ok, {VersionActual, Estado}} when VersionActual == VersionNueva ->
+        {ok, {VersionActual, Estado, _}} when VersionActual == VersionNueva ->
             %% Una copia de igual versión puede completar un desalojo previo.
             case {Estado, Contenido} of
                 {desalojado, {valor, _, _}} ->
@@ -39,7 +39,7 @@ aplicar_actualizacion(Clave, {VersionNueva, Contenido} = Nueva, Valores, Metadat
                 _ ->
                     Valores
             end;
-        {ok, {VersionActual, _}} when VersionActual > VersionNueva ->
+        {ok, {VersionActual, _, _}} when VersionActual > VersionNueva ->
             Valores;
         _ ->
             case Contenido of
@@ -52,10 +52,10 @@ aplicar_actualizacion(Clave, {VersionNueva, Contenido} = Nueva, Valores, Metadat
 -spec version_no_obsoleta(
     term(),
     {integer(), term()},
-    #{term() => {integer(), valor | borrado | desalojado}}
+    #{term() => {integer(), valor | borrado | desalojado, reference()}}
 ) -> boolean().
 version_no_obsoleta(Clave, {VersionNueva, _Contenido}, Metadatos) ->
     case maps:find(Clave, Metadatos) of
         error -> true;
-        {ok, {VersionActual, _Estado}} -> VersionNueva >= VersionActual
+        {ok, {VersionActual, _Estado, _}} -> VersionNueva >= VersionActual
     end.
