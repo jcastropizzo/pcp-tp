@@ -7,11 +7,11 @@
 ## Experimento de metadata · 20/11/2026
 
 Se aplica por replica el cupo `simple_kv_almacen:cupo_metadatos/2`:
-`max(1, cantidad_de_peers) * Alfa`. Los peers excluyen al nodo local; el
-minimo Alfa conserva la metadata de sus valores residentes en un nodo solo.
-La funcion documenta que esta heuristica de tamano esta pensada para alfas y
-cantidades de peers chicos; para alfas grandes hay que reevaluar memoria y
-costo del recorte. El cupo es de entradas, no de bytes.
+`max(2, cantidad_de_peers) * Alfa`. Los peers excluyen al nodo local;
+con 0, 1 o 2 peers se usa un cupo de `2 * Alfa`, y con mas peers se usa
+su cantidad real. El comentario identifica una heuristica de tamano para
+alfas y cantidades de peers chicos; para alfas grandes hay que reevaluar
+memoria y costo del recorte. El cupo es de entradas, no de bytes.
 
 Siempre se conserva la metadata de valores residentes y se completa el cupo
 con las marcas de mayor version. Esto limita el crecimiento, pero **no resuelve
@@ -22,18 +22,23 @@ Con tres replicas, Alfa = 4 y cinco tandas de doce claves, la metadata queda
 en 8 por replica en ambas mediciones. `Recientes` queda en 3; los valores
 quedan en 4 con desalojos y en 0 con borrados.
 
-**Verificacion de esta variante:** compilacion sin advertencias;
-86 pruebas aprobadas y 8 fallidas de 94. Dos fallos nuevos muestran la
-resurreccion de un borrado por escritura u oferta vieja. Seis pruebas
-anteriores tambien fallan porque el cupo elimina marcas que esperaban
-observar. Se conservan sus expectativas, sin ocultar esos fallos.
-Una prueba adicional del caso borde documentado pasa al reproducir la
-resurreccion; caracteriza la limitacion aceptada para este experimento, sin
-acreditar seguridad del borrado.
+**Verificacion de esta variante:** compilacion sin advertencias y
+**92/92 pruebas aprobadas**. El caso borde se reproduce con `start_link`,
+`put`, `delete`, `get` y `stop` reales. El debugger de OTP pausa P1 al
+entrar a `replicar/3`; no se construyen mensajes ni versiones en el test.
+Su resultado esperado es la resurreccion conocida: no acredita seguridad
+del borrado. Las pruebas anteriores de entregas sinteticas de este caso
+fueron reemplazadas por esta reproduccion por API; los 83 tests historicos
+permanecen sin cambiar y pasan con el nuevo piso del cupo.
+
+Para ese test se necesita el componente `debugger` de Erlang/OTP, sin interfaz
+grafica. `rebar.config` ya compila con `debug_info`, necesario para el punto de
+pausa. El test retira el punto de pausa y la interpretacion al terminar.
 
 La tabla siguiente y el PDF enlazado al principio describen la entrega
 original; no acreditan la correccion de esta variante. El informe fuente
-explicita la limitacion actual. Trabajo aislado en una rama y PR experimental; no implica reentrega ni integracion en main.
+explicita la limitacion actual. Trabajo aislado en una rama y PR experimental;
+no implica reentrega ni integracion en main.
 
 ## Requisitos y estado
 
@@ -63,6 +68,6 @@ rebar3 compile
 rebar3 eunit
 ```
 
-**Resultado historico de la entrega original:** 83/83 tests EUnit y compilacion sin advertencias. Para la variante actual, ver el estado experimental de arriba: la suite completa falla.
+**Resultado historico de la entrega original:** 83/83 tests EUnit y compilacion sin advertencias. Para la variante actual, ver el estado experimental de arriba: 92/92, incluyendo la caracterizacion del defecto conocido.
 
 La compilación directa se verifica con `erlc +warn_all -Werror -o <directorio-temporal> src/*.erl test/*.erl`. Se asume una sola BEAM, procesos vivos y un único `stop/1` al final con todos los pids devueltos por `start_link/2`.

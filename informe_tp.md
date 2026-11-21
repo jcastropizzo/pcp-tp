@@ -3,12 +3,13 @@
 Programación Concurrente y Paralela · Segundo cuatrimestre de 2026
 
 > **Variante experimental al 20/11/2026.** Se limita la metadata con
-> `cupo_metadatos/2`: `max(1, cantidad_de_peers) * Alfa`. Se preservan las
+> `cupo_metadatos/2`: `max(2, cantidad_de_peers) * Alfa`. Se preservan las
 > entradas de valores residentes y las marcas mas nuevas que entren en el
 > cupo. La heuristica se penso para alfas y cantidades de peers chicos;
 > para alfas grandes se debe reevaluar memoria y costo del recorte. No es
 > una recoleccion segura: olvidar una marca puede revivir un dato borrado.
-> La suite actual tiene 86 aprobados y 8 fallidos de 94; no es una version
+> La suite actual tiene 92/92 aprobados, incluido el caso borde que espera
+> la resurreccion conocida por API; no es una version
 > lista para reentrega. La [cronologia detallada](docs/metadata_cupo.md)
 > distingue la cota de espacio de las garantias que quedan incumplidas.
 > El PDF existente corresponde a la entrega original y no fue regenerado.
@@ -71,7 +72,7 @@ La réplica sigue atendiendo durante la espera y cada consulta entre pares se re
 
 En la entrega original, la conservacion indefinida de la mayor version por clave sustentaba el argumento de convergencia observable. El cupo experimental rompe esa premisa: despues de que cesen las escrituras y se procesen todos los mensajes, puede quedar un valor resucitado por una escritura u oferta anterior al borrado. Esperar la propagacion no lo corrige. Por lo tanto no se afirma convergencia correcta ni preservacion general del borrado para esta variante. El TTL se sigue verificando al responder y el cupo de valores y el ranking protegido se mantienen, pero no alcanzan para suplir la version olvidada.
 
-Las pruebas incluyen versiones en órdenes opuestos, borrados atrasados, ofertas, consultas concurrentes, TTL durante una consulta y desalojo asimétrico entre dos réplicas. Verifican escenarios concretos. Los argumentos de la entrega original dependian de conservar las marcas. Las dos regresiones nuevas de borrado quedan fallando y exponen la limitacion actual; las mediciones de tamano solo acreditan el cupo.
+Las pruebas incluyen versiones en órdenes opuestos, borrados atrasados, ofertas, consultas concurrentes, TTL durante una consulta y desalojo asimétrico entre dos réplicas. Verifican escenarios concretos. Los argumentos de la entrega original dependian de conservar las marcas. La prueba del caso borde usa operaciones reales de la API y un punto de pausa del debugger de OTP antes del envio pendiente. Pasa al observar la resurreccion conocida, sin fabricar mensajes ni versiones; no acredita seguridad. Reemplaza las pruebas de entregas sinteticas de ese caso. Las mediciones de tamano solo acreditan el cupo.
 
 ## 7. Ejemplos de lectura y desalojo
 

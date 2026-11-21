@@ -64,11 +64,11 @@ version_no_obsoleta(Clave, {VersionNueva, _Contenido}, Metadatos) ->
 %% Heuristica de tamano pensada para alfas y cantidades de peers chicos.
 %% Para alfas grandes probablemente haya que reevaluar el presupuesto de
 %% memoria y el costo del recorte. No garantiza seguridad de los borrados.
-%% Los peers excluyen al nodo local; sin peers se conserva al menos alfa.
+%% Los peers excluyen al nodo local; se toma un minimo de dos peers para el cupo.
 -spec cupo_metadatos(non_neg_integer(), pos_integer()) -> pos_integer().
 cupo_metadatos(CantidadPeers, Alfa) when
     is_integer(CantidadPeers), CantidadPeers >= 0, is_integer(Alfa), Alfa > 0 ->
-    max(1, CantidadPeers) * Alfa.
+    max(2, CantidadPeers) * Alfa.
 
 %% Cupo experimental: siempre conserva la metadata de valores residentes y
 %% completa con las marcas de mayor version. No demuestra que las otras sean

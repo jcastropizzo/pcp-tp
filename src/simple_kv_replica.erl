@@ -14,7 +14,7 @@ init() ->
         {configurar, Pares, Alfa} -> continuar(Pares, Alfa, #{}, #{}, #{}, #{})
     end.
 
-%% Pares excluye a self(). Un nodo solo conserva al menos alfa entradas.
+%% Pares excluye a self(). El cupo usa como minimo dos peers, aun con un nodo solo.
 %% El cupo se aplica antes de cada nueva recepcion, sin barrera ni timeout.
 continuar(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
     Limite = simple_kv_almacen:cupo_metadatos(length(Pares), Alfa),

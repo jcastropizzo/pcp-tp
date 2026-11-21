@@ -2,8 +2,8 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% Tres replicas, alfa = 4: cupo = 2 * 4 = 8 por replica.
-%% Se mide con propagacion estabilizada. Los tests adversos al final deben
-%% fallar mientras el cupo permita olvidar un borrado y revivir el valor.
+%% Se mide con propagacion estabilizada. El ultimo test documenta por API
+%% la resurreccion conocida; que pase no demuestra seguridad del borrado.
 metadata_se_estabiliza_con_desalojos_test() ->
     medir(desalojo).
 
@@ -98,7 +98,7 @@ recoger_trazas({Estados, N}) ->
     after 0 -> {Estados, N}
     end.
 
-replica_unica_conserva_valores_con_cupo_alfa_test() ->
+replica_unica_conserva_valores_con_cupo_dos_alfa_test() ->
     {ok, [P]} = simple_kv:start_link(1, 4),
     try
         simple_kv_test_utils:escribir(P, [a, b, c, d, e, f]),
@@ -106,67 +106,85 @@ replica_unica_conserva_valores_con_cupo_alfa_test() ->
                       [c, d, e, f])
     after simple_kv:stop([P]) end.
 
-%% Limitaciones conocidas: se exige not_found y se expone el incumplimiento.
-escritura_vieja_no_debe_revivir_borrado_recolectado_test() ->
-    borrado_recolectado(replicar, not_found).
-
-oferta_vieja_no_debe_revivir_borrado_recolectado_test() ->
-    borrado_recolectado(ofrecer, not_found).
-
-%% Caracterizacion del caso borde aceptado para este experimento.
-%% Debe pasar al reproducir la resurreccion; NO acredita seguridad del borrado.
-%% Comparte la secuencia con la regresion anterior, que exige not_found.
-caso_borde_documentado_escritura_vieja_restaura_borrada_test() ->
-    borrado_recolectado(replicar, {ok, rojo}).
-
-borrado_recolectado(Tipo, Esperado) ->
-    {ok, [P1, _P2, P3] = Pids} = simple_kv:start_link(3, 4),
-    A = spawn_link(fun emisor_controlado/0),
-    B = spawn_link(fun emisor_controlado/0),
-    Vieja = {simple_kv_replicacion:nueva_version(), {valor, rojo, infinity}},
-    Borrado = {simple_kv_replicacion:nueva_version(), borrado},
+%% Caso borde conocido por API real: el debugger solo demora la ejecucion de
+%% P1 al entrar a replicar/3. No se construyen mensajes ni versiones en el test.
+%% Esta expectativa documenta el defecto; no valida la seguridad del borrado.
+caso_borde_documentado_put_viejo_restaura_borrada_por_api_test() ->
+    ?assertNot(lists:member(simple_kv_replicacion, int:interpreted())),
+    {module, simple_kv_replicacion} = int:i(simple_kv_replicacion),
+    ok = int:break_in(simple_kv_replicacion, replicar, 3),
+    {module, simple_kv_replica} = code:ensure_loaded(simple_kv_replica),
+    erlang:trace_pattern({simple_kv_replica, loop, 6}, true, [local]),
+    {ok, [P1, P2, P3] = Pids} = simple_kv:start_link(3, 4),
     try
-        %% Dos emisores distintos inyectan el orden de entrega del ejemplo.
-        %% No son los procesos de origen reales: el arnes controla el protocolo.
-        entregar(A, [P1], {replicar, k, Vieja}, k),
-        entregar(B, Pids, {replicar, k, Borrado}, k),
-        %% Precondicion: todas aplicaron el borrado y ya no devuelven rojo.
-        lists:foreach(fun(P) ->
-            ?assertEqual({ok, Borrado}, simple_kv_test_utils:consultar_local(P, k)),
-            ?assertEqual(not_found, simple_kv:get(P, k))
-        end, Pids),
+        [erlang:trace(P, true, [call, send, 'receive', {tracer, self()}]) || P <- [P2, P3]],
+        %% El ok del put es local: P1 puede pausarse antes de propagarlo.
+        ok = simple_kv:put(P1, k, rojo),
+        esperar_break(P1, erlang:monotonic_time(millisecond) + 1000),
+        ok = int:no_break(simple_kv_replicacion),
+        ?assertEqual([], int:all_breaks(simple_kv_replicacion)),
+        ok = simple_kv:delete(P2, k),
+        %% La marca llega a P3 antes de que se hagan los borrados de relleno.
+        Borrada = esperar_estados([P2, P3], fun({_V, M, _R, _P}) ->
+            case maps:find(k, M) of {ok, {_, borrado}} -> true; _ -> false end
+        end, {#{}, 0}),
+        ?assertEqual(not_found, simple_kv:get(P3, k)),
+        Cupo = simple_kv_almacen:cupo_metadatos(length(Pids) - 1, 4),
         lists:foreach(fun(N) ->
-            K = {relleno, N},
-            Entrada = {simple_kv_replicacion:nueva_version(), borrado},
-            entregar(B, Pids, {replicar, K, Entrada}, K)
-        end, lists:seq(1, 8)),
-        lists:foreach(fun(P) ->
-            ?assertEqual(error, simple_kv_test_utils:consultar_local(P, k))
-        end, Pids),
-        entregar(A, [P3], {Tipo, k, Vieja}, k),
-        ?assertEqual(Esperado, simple_kv:get(P3, k))
+            ok = simple_kv:delete(P2, {relleno, N})
+        end, lists:seq(1, Cupo)),
+        Olvidada = esperar_estados([P2, P3], fun({V, M, _R, _P}) ->
+            not maps:is_key(k, V) andalso not maps:is_key(k, M)
+                andalso maps:is_key({relleno, Cupo}, M)
+        end, Borrada),
+        %% P1 completa el envio real pendiente y luego procesa los borrados
+        %% que acumulo en su buzon. No hay otro put de k en toda la secuencia.
+        erlang:trace(P1, true, [call, send, 'receive', {tracer, self()}]),
+        ok = int:continue(P1),
+        Restaurada = esperar_estados([P3], fun({V, _M, _R, _P}) ->
+            maps:is_key(k, V)
+        end, Olvidada),
+        esperar_estados([P1], fun({V, M, _R, _P}) ->
+            not maps:is_key(k, V) andalso maps:is_key({relleno, Cupo}, M)
+        end, Restaurada),
+        ?assertEqual({ok, rojo}, simple_kv:get(P3, k))
     after
-        A ! stop,
-        B ! stop,
-        simple_kv:stop(Pids)
+        int:no_break(simple_kv_replicacion),
+        int:continue(P1),
+        [erlang:trace(P, false, [all]) || P <- Pids],
+        erlang:trace_pattern({simple_kv_replica, loop, 6}, false, [local]),
+        simple_kv:stop(Pids),
+        int:n(simple_kv_replicacion),
+        recoger_trazas({#{}, 0})
     end.
 
-entregar(Emisor, Destinos, Mensaje, Clave) ->
-    Ref = make_ref(),
-    Emisor ! {entregar, self(), Ref, Destinos, Mensaje, Clave},
-    receive {Ref, entregado} -> ok
-    after 1000 -> error(entrega_controlada_sin_respuesta)
+esperar_break(Pid, Plazo) ->
+    case lists:any(fun
+        ({P, _, break, {simple_kv_replicacion, _Linea}}) -> P =:= Pid;
+        (_) -> false
+    end, int:snapshot()) of
+        true -> ok;
+        false ->
+            ?assert(erlang:monotonic_time(millisecond) < Plazo),
+            timer:sleep(1),
+            esperar_break(Pid, Plazo)
     end.
 
-emisor_controlado() ->
-    receive
-        {entregar, Cliente, Ref, Destinos, Mensaje, Clave} ->
-            lists:foreach(fun(P) ->
-                P ! Mensaje,
-                %% La consulta del mismo emisor es una barrera FIFO.
-                simple_kv_test_utils:consultar_local(P, Clave)
-            end, Destinos),
-            Cliente ! {Ref, entregado},
-            emisor_controlado();
-        stop -> ok
+esperar_estados(Pids, Predicado, Observacion) ->
+    esperar_estados(Pids, Predicado, Observacion,
+                    erlang:monotonic_time(millisecond) + 1000).
+
+esperar_estados(Pids, Predicado, Observacion, Plazo) ->
+    {Estados, _} = Nueva = sincronizar_trazas(Observacion),
+    case lists:all(fun(P) ->
+        case maps:find(P, Estados) of
+            {ok, Estado} -> Predicado(Estado);
+            error -> false
+        end
+    end, Pids) of
+        true -> Nueva;
+        false ->
+            ?assert(erlang:monotonic_time(millisecond) < Plazo),
+            timer:sleep(1),
+            esperar_estados(Pids, Predicado, Nueva, Plazo)
     end.
