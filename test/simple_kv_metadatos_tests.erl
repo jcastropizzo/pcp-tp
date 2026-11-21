@@ -108,12 +108,18 @@ replica_unica_conserva_valores_con_cupo_alfa_test() ->
 
 %% Limitaciones conocidas: se exige not_found y se expone el incumplimiento.
 escritura_vieja_no_debe_revivir_borrado_recolectado_test() ->
-    borrado_recolectado(replicar).
+    borrado_recolectado(replicar, not_found).
 
 oferta_vieja_no_debe_revivir_borrado_recolectado_test() ->
-    borrado_recolectado(ofrecer).
+    borrado_recolectado(ofrecer, not_found).
 
-borrado_recolectado(Tipo) ->
+%% Caracterizacion del caso borde aceptado para este experimento.
+%% Debe pasar al reproducir la resurreccion; NO acredita seguridad del borrado.
+%% Comparte la secuencia con la regresion anterior, que exige not_found.
+caso_borde_documentado_escritura_vieja_restaura_borrada_test() ->
+    borrado_recolectado(replicar, {ok, rojo}).
+
+borrado_recolectado(Tipo, Esperado) ->
     {ok, [P1, _P2, P3] = Pids} = simple_kv:start_link(3, 4),
     A = spawn_link(fun emisor_controlado/0),
     B = spawn_link(fun emisor_controlado/0),
@@ -124,6 +130,11 @@ borrado_recolectado(Tipo) ->
         %% No son los procesos de origen reales: el arnes controla el protocolo.
         entregar(A, [P1], {replicar, k, Vieja}, k),
         entregar(B, Pids, {replicar, k, Borrado}, k),
+        %% Precondicion: todas aplicaron el borrado y ya no devuelven rojo.
+        lists:foreach(fun(P) ->
+            ?assertEqual({ok, Borrado}, simple_kv_test_utils:consultar_local(P, k)),
+            ?assertEqual(not_found, simple_kv:get(P, k))
+        end, Pids),
         lists:foreach(fun(N) ->
             K = {relleno, N},
             Entrada = {simple_kv_replicacion:nueva_version(), borrado},
@@ -133,7 +144,7 @@ borrado_recolectado(Tipo) ->
             ?assertEqual(error, simple_kv_test_utils:consultar_local(P, k))
         end, Pids),
         entregar(A, [P3], {Tipo, k, Vieja}, k),
-        ?assertEqual(not_found, simple_kv:get(P3, k))
+        ?assertEqual(Esperado, simple_kv:get(P3, k))
     after
         A ! stop,
         B ! stop,

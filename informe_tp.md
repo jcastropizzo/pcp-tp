@@ -8,7 +8,7 @@ Programación Concurrente y Paralela · Segundo cuatrimestre de 2026
 > cupo. La heuristica se penso para alfas y cantidades de peers chicos;
 > para alfas grandes se debe reevaluar memoria y costo del recorte. No es
 > una recoleccion segura: olvidar una marca puede revivir un dato borrado.
-> La suite actual tiene 85 aprobados y 8 fallidos de 93; no es una version
+> La suite actual tiene 86 aprobados y 8 fallidos de 94; no es una version
 > lista para reentrega. La [cronologia detallada](docs/metadata_cupo.md)
 > distingue la cota de espacio de las garantias que quedan incumplidas.
 > El PDF existente corresponde a la entrega original y no fue regenerado.

@@ -109,6 +109,14 @@ el `put`/`delete` original con una pausa real dentro de P1**: la cronología
 anterior explica por qué ese orden es alcanzable por la implementación. La
 variante de oferta prueba el receptor, no la planificación completa del emisor.
 
+La prueba
+`caso_borde_documentado_escritura_vieja_restaura_borrada_test/0` recorre la misma
+secuencia de escritura vieja, verifica que las tres réplicas aplicaron el
+borrado y respondían `not_found`, desplaza la marca con ocho borrados de
+relleno y finalmente entrega V1. **Esta prueba pasa al observar `{ok, rojo}`**:
+documenta el caso borde conocido y aceptado para el experimento, no el
+cumplimiento de la consigna. No se realiza ninguna escritura nueva de `k`.
+
 Las regresiones adversas exigen `not_found` y se dejan fallar con `{ok, rojo}`.
 No se invierte la expectativa para que la suite aparente validar la seguridad.
 Pasar las pruebas de tamaño acredita el cupo, no la preservación general de
@@ -119,8 +127,8 @@ ejemplo. Este cambio es experimental y no está listo para reentrega.
 ## Resultado de la verificación
 
 Compilación con `rebar3 compile` y compilación directa con
-`erlc +warn_all -Werror` sin advertencias. Suite completa: **85 aprobados y
-8 fallidos de 93**, sobre una copia temporal de los mismos fuentes.
+`erlc +warn_all -Werror` sin advertencias. Suite completa: **86 aprobados y
+8 fallidos de 94**, sobre una copia temporal de los mismos fuentes.
 
 Las dos mediciones por cinco tandas de doce claves pasan: metadata = 8 por
 réplica en todas las tandas, `Recientes` = 3; valores = 4 con desalojo y 0 con

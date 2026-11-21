@@ -23,10 +23,13 @@ en 8 por replica en ambas mediciones. `Recientes` queda en 3; los valores
 quedan en 4 con desalojos y en 0 con borrados.
 
 **Verificacion de esta variante:** compilacion sin advertencias;
-85 pruebas aprobadas y 8 fallidas de 93. Dos fallos nuevos muestran la
+86 pruebas aprobadas y 8 fallidas de 94. Dos fallos nuevos muestran la
 resurreccion de un borrado por escritura u oferta vieja. Seis pruebas
 anteriores tambien fallan porque el cupo elimina marcas que esperaban
 observar. Se conservan sus expectativas, sin ocultar esos fallos.
+Una prueba adicional del caso borde documentado pasa al reproducir la
+resurreccion; caracteriza la limitacion aceptada para este experimento, sin
+acreditar seguridad del borrado.
 
 La tabla siguiente y el PDF enlazado al principio describen la entrega
 original; no acreditan la correccion de esta variante. El informe fuente
