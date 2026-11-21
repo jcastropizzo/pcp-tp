@@ -129,7 +129,7 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
     Marca = make_ref(),
     Entrada = {1, {valor, remoto, infinity}},
     Par = spawn(fun() -> par_controlado(Padre, Marca, #{1 => Entrada}) end),
-    Pid = spawn_link(fun simple_kv_replica:init/0),
+    Pid = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
     Pid ! {configurar, [Par], 16},
     try
         Pid ! {replicar, 1, Entrada},
@@ -153,8 +153,8 @@ consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
     Padre = self(),
     Marca = make_ref(),
     ParDemorado = spawn(fun() -> retener_consultas(Padre, Marca, []) end),
-    P1 = spawn_link(fun simple_kv_replica:init/0),
-    P2 = spawn_link(fun simple_kv_replica:init/0),
+    P1 = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
+    P2 = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
     P1 ! {configurar, [P2, ParDemorado], 16},
     P2 ! {configurar, [P1, ParDemorado], 16},
     Clientes = [spawn(fun() ->
@@ -222,9 +222,12 @@ valor_remoto_vence_antes_de_finalizar_get_test() ->
 %% Un vencimiento elegible durante la demora permite al par conservar una copia remota.
 replica_demorada_conserva_copia_para_get_test() ->
     {ok, [P1, P2] = Pids} = simple_kv:start_link(2, 4),
-    true = erlang:suspend_process(P2),
     try
-        escribir(P1, [k]),
+        %% P2 origina k para que las cuatro operaciones siguientes quepan
+        %% en el cupo local de P1 mientras P2 está suspendida.
+        escribir(P2, [k]),
+        ?assertEqual({ok, k}, simple_kv:get(P1, k)),
+        true = erlang:suspend_process(P2),
         ok = simple_kv:put(P1, temporal, temporal, 500),
         escribir(P1, [a, b, c]),
         {ok, {Version, desalojado}} = consultar_local(P1, k),
@@ -270,7 +273,7 @@ retener_consultas(Padre, Marca, Acumuladas) ->
 
 con_lectura_retenida(Verificar) ->
     ParDemorado = spawn(fun responder_al_liberar/0),
-    P = spawn_link(fun simple_kv_replica:init/0),
+    P = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
     P ! {configurar, [self(), ParDemorado], 3},
     Padre = self(),
     Cliente = spawn(fun() -> Padre ! {lectura, self(), simple_kv:get(P, k)} end),

@@ -61,7 +61,7 @@ oferta_vieja_no_revive_borrado_test() ->
 
 %% Un vencido que sale del mapa no se ofrece al par.
 no_se_ofrece_un_vencido_al_desalojarlo_test() ->
-    P = spawn_link(fun simple_kv_replica:init/0),
+    P = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
     P ! {configurar, [self()], 3},
     try
         ok = simple_kv:put(P, vencido, descartado, 0),
@@ -77,7 +77,7 @@ no_se_ofrece_un_vencido_al_desalojarlo_test() ->
 
 %% Una oferta puede reutilizar un vencido elegible, sin desalojar vigentes ni reenviar ofertas.
 oferta_reutiliza_vencido_elegible_test() ->
-    P = spawn_link(fun simple_kv_replica:init/0),
+    P = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
     P ! {configurar, [self()], 4},
     try
         Inicio = simple_kv_replicacion:nueva_version(),

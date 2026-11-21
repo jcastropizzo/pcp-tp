@@ -31,7 +31,7 @@ iniciar(N, Alfa) ->
 
 %% Replica cuyo unico par es el proceso del test.
 replica_con_par_falso(Alfa) ->
-    Rep = spawn_link(fun simple_kv_replica:init/0),
+    Rep = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
     Rep ! {configurar, [self()], Alfa},
     Rep.
 
