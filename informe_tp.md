@@ -2,12 +2,18 @@
 
 Programación Concurrente y Paralela · Segundo cuatrimestre de 2026
 
+> El PDF de la entrega original se conserva como referencia histórica. El
+> [diseño de transacciones por clave](docs/metadata_transacciones.md) describe
+> los mensajes de coordinación y demuestra la cota de esta variante.
+
 ## 1. Estado de cada réplica
+
+Un proceso coordinador registra las reservas y las confirmaciones. Su tabla admite hasta N × α + 1 claves y no guarda valores.
 
 Cada réplica es un proceso enlazado al invocante de `start_link/2`. Recibe los pids de sus pares y la capacidad α. El estado pasa por los argumentos de su ciclo de recepción.
 
 - `Valores` guarda hasta α asociaciones `Clave => {Version, {valor, Valor, Vence}}`. Cada clave ocupa a lo sumo una plaza.
-- `Metadatos` guarda la mayor versión aplicada de cada clave y su estado, `valor`, `borrado` o `desalojado`. Las marcas sobreviven a la salida del valor y permiten rechazar mensajes obsoletos.
+- `Metadatos` guarda la mayor versión aplicada de cada clave y su estado, `valor`, `borrado` o `desalojado`. Cada marca incluye una referencia de reserva. Sobrevive a la salida del valor hasta que el coordinador confirma que es seguro olvidar la clave.
 - `Recientes` registra claves y versiones de las últimas escrituras conocidas que definen la protección de capacidad. La cantidad de registros está acotada por el cupo protegido.
 - `Pendientes` registra cada lectura en curso, su cliente, la clave, los pares que todavía deben contestar y el mejor candidato transitorio. La entrada se elimina al responder. Solo `Valores` se usa como almacenamiento de la base de datos.
 
@@ -27,20 +33,21 @@ Al contestar un `get`, se evalúa el vencimiento del candidato ganador, incluso 
 
 | Mensaje | Emisor | Receptor | Efecto |
 | --- | --- | --- | --- |
-| `{configurar, Pares, Alfa}` | Invocante de `start_link/2` | Réplica nueva | Inicializa los pares, la capacidad y los mapas. |
-| `{put, Cliente, RefCliente, Clave, Valor, TTL}` | Cliente | Réplica elegida | Genera versión y vencimiento, aplica la escritura con el límite de capacidad y propaga el cambio. |
-| `{delete, Cliente, RefCliente, Clave}` | Cliente | Réplica elegida | Quita el valor, guarda una marca versionada y propaga el borrado. |
+| `{configurar, Pares, Alfa, Coordinador}` | Invocante de `start_link/2` | Réplica nueva | Inicializa los pares, la capacidad y los mapas. |
+| `{pedir_cupo, Cliente, Ref, Clave}` | Cliente, vía su réplica | Coordinador | Solicita una reserva para un cambio. |
+| `{Ref, permiso, Reserva, IdCambio}` | Coordinador | Cliente | Autoriza el cambio. |
+| `{cambiar, Cliente, Ref, Clave, Reserva, IdCambio, Contenido}` | Cliente | Réplica elegida | Aplica y propaga la escritura o el borrado. |
 | `{get, Cliente, RefCliente, Clave}` | Cliente | Réplica elegida | Responde a partir de la información local o inicia una consulta a los pares. |
 | `{RefCliente, ok}` | Réplica | Cliente | Completa el `put` o `delete` local. |
 | `{RefCliente, ok, Valor}` | Réplica | Cliente | Completa un `get` con el valor vigente. |
 | `{RefCliente, not_found}` | Réplica | Cliente | Completa un `get` sin valor disponible. |
-| `{replicar, Clave, Entrada}` | Réplica de origen | Todos sus pares | Aplica un valor o borrado versionado según el orden de versiones. |
-| `{ofrecer, Clave, Entrada}` | Réplica que desaloja | Todos sus pares | Da al receptor la opción de conservar un valor vigente. |
+| `{replicar, Clave, Reserva, IdCambio, Entrada}` | Réplica de origen | Todos sus pares | Aplica un valor o borrado versionado según el orden de versiones. |
+| `{ofrecer, Clave, Reserva, IdCambio, RefOferta, Entrada}` | Réplica que desaloja | Todos sus pares | Da al receptor la opción de conservar un valor vigente. |
 | `{consultar, Solicitante, RefConsulta, Clave}` | Réplica que atiende un `get` | Todos sus pares | Solicita la entrada o marca local. |
 | `{respuesta_consulta, RefConsulta, Par, Resultado}` | Par consultado | Réplica solicitante | Aporta un candidato y completa el turno de ese par para esa lectura. |
 | `stop` | Invocante de `stop/1` | Réplica monitoreada | Termina su ciclo de recepción. |
 
-Cada pedido usa una referencia única. `put` y `delete` devuelven `ok` después de aplicar el cambio local, sin esperar confirmaciones de los pares. `stop/1` devuelve `ok` después de recibir los avisos de terminación de todos los pids.
+Los avisos de aplicación, ofertas resueltas y olvido se detallan en la [especificación](docs/metadata_transacciones.md). Cada pedido usa una referencia única. Antes de aplicar un `put` o `delete` se pide una reserva al coordinador. La operación admitida devuelve `ok` después de aplicar el cambio local, sin esperar confirmaciones de los pares. Un pedido puede esperar antes de ser admitido si su clave tiene otro cambio en curso o si necesita una plaza y se agotó el cupo. `stop/1` devuelve `ok` después de recibir los avisos de terminación de todos los pids.
 
 ## 5. Capacidad y desalojo
 
@@ -50,7 +57,7 @@ Una sobrescritura reutiliza su plaza y una clave nueva usa una plaza libre. Si e
 
 El corte del ranking se mantiene o sube a medida que se conocen escrituras. Una versión que salió de la protección solo puede volver a quedar protegida con una escritura más nueva de esa clave. Al haber α residentes más el entrante, existe al menos un candidato fuera del cupo protegido. Las escrituras protegidas que sigan vigentes conservan su copia local tras la actualización.
 
-Antes de descartar un valor vigente, se lo ofrece a todos los pares. Un par puede aceptar una oferta en una plaza libre, en la plaza de la misma clave o reemplazando un vencido elegible. Tramitar una oferta no emite mensajes. Por cada desalojo vigente hay a lo sumo un envío por par y ninguna cadena de ofertas. Si todos lo descartan, se admite la pérdida en el peor caso contemplado por la consigna.
+Antes de descartar un valor vigente, se lo ofrece a todos los pares. Un par puede aceptar una oferta en una plaza libre, en la plaza de la misma clave o reemplazando un vencido elegible. Tramitar una oferta manda su resultado al coordinador y no genera nuevas ofertas. Por cada desalojo vigente hay a lo sumo un envío por par y ninguna cadena de ofertas. Si todos lo descartan, se admite la pérdida en el peor caso contemplado por la consigna.
 
 ## 6. Algoritmo de `get` y convergencia
 
@@ -58,7 +65,7 @@ Si la réplica tiene un valor o un borrado, usa esa información. Si desconoce l
 
 La réplica sigue atendiendo durante la espera y cada consulta entre pares se responde en un solo paso local. Bajo los supuestos de procesos vivos, entrega y ejecución eventual, no se forma una dependencia circular. El candidato en `Pendientes` existe durante ese pedido y solo interviene en su respuesta. Los demás pedidos consultan su propia información local y, si hace falta, inician su propia lectura.
 
-Después de que cesan las escrituras y se procesan las actualizaciones y ofertas, todas las réplicas conocen la mayor versión por clave. Si la versión ganadora es un borrado o está vencida, la lectura da `not_found`. Si una réplica conserva una copia vigente, las que la desalojaron pueden obtenerla por consulta. Si se perdió la última copia, todas devuelven `not_found`. Los mapas locales pueden diferir según el momento del desalojo. Las lecturas a lados distintos del instante de expiración pueden observar resultados distintos.
+Después de que cesan las escrituras y se procesan las actualizaciones y ofertas, todas las réplicas conocen la mayor versión de las claves que todavía tienen alguna copia. El coordinador confirma el olvido de las claves sin copias luego de drenar las lecturas anteriores. Si la versión ganadora es un borrado o está vencida, la lectura da `not_found`. Si una réplica conserva una copia vigente, las que la desalojaron pueden obtenerla por consulta. Si se perdió la última copia, todas devuelven `not_found`. Los mapas locales pueden diferir según el momento del desalojo. Las lecturas a lados distintos del instante de expiración pueden observar resultados distintos.
 
 Las pruebas incluyen versiones en órdenes opuestos, borrados atrasados, ofertas, consultas concurrentes, TTL durante una consulta y desalojo asimétrico entre dos réplicas. Verifican escenarios concretos. Los argumentos anteriores cubren el diseño bajo los supuestos de la consigna.
 

@@ -1,69 +1,69 @@
 -module(simple_kv_consultas_tests).
 -include_lib("eunit/include/eunit.hrl").
--import(simple_kv_test_utils, [iniciar/2, replica_con_par_falso/1, escribir/2,
+-import(simple_kv_test_utils, [iniciar/2, replicas_con_pares_controlados/3, escribir/2,
                               lecturas/2, consultar_local/2, get_async/2,
-                              esperar_get/1, esperar_consulta/1, responder_consulta/3]).
+                              esperar_get/1, esperar_consulta/2, responder_consulta/4]).
 
 %% Un valor desalojado localmente se recupera desde otra replica.
 lee_valor_desalojado_desde_otra_replica_test() ->
-    Rep = replica_con_par_falso(3),
+    {[Rep], [Par]} = replicas_con_pares_controlados(1, 1, 3),
     escribir(Rep, [1, 2, 3, 4]),
     Entry1 = receive {ofrecer, 1, E} -> E after 1000 -> erlang:error(sin_oferta) end,
     ok = get_async(Rep, 1),
-    {Rep, RefConsulta} = esperar_consulta(1),
-    ok = responder_consulta(Rep, RefConsulta, {ok, Entry1}),
+    {Rep, RefConsulta} = esperar_consulta(Par, 1),
+    ok = responder_consulta(Rep, RefConsulta, Par, {ok, Entry1}),
     ?assertEqual({ok, 1}, esperar_get(1)),
-    ok = simple_kv:stop([Rep]).
+    ok = simple_kv:stop([Rep, Par]).
 
 %% Clave que nadie conoce: consulta y responde not_found.
 clave_desconocida_test() ->
-    Rep = replica_con_par_falso(3),
+    {[Rep], [Par]} = replicas_con_pares_controlados(1, 1, 3),
     ok = get_async(Rep, nunca),
-    {Rep, RefConsulta} = esperar_consulta(nunca),
-    ok = responder_consulta(Rep, RefConsulta, error),
+    {Rep, RefConsulta} = esperar_consulta(Par, nunca),
+    ok = responder_consulta(Rep, RefConsulta, Par, error),
     ?assertEqual(not_found, esperar_get(nunca)),
-    ok = simple_kv:stop([Rep]).
+    ok = simple_kv:stop([Rep, Par]).
 
 %% Entre lo local (desalojado) y lo que responde el par, gana la version
 %% mas alta: si el par tiene un borrado mas nuevo, el resultado es not_found.
 gana_la_version_mas_alta_test() ->
-    Rep = replica_con_par_falso(3),
+    {[Rep], [Par]} = replicas_con_pares_controlados(1, 1, 3),
     escribir(Rep, [1, 2, 3, 4]),
     ok = get_async(Rep, 1),
-    {Rep, RefConsulta} = esperar_consulta(1),
+    {Rep, RefConsulta} = esperar_consulta(Par, 1),
     BorradoNuevo = {simple_kv_replicacion:nueva_version(), borrado},
-    ok = responder_consulta(Rep, RefConsulta, {ok, BorradoNuevo}),
+    ok = responder_consulta(Rep, RefConsulta, Par, {ok, BorradoNuevo}),
     ?assertEqual(not_found, esperar_get(1)),
-    ok = simple_kv:stop([Rep]).
+    ok = simple_kv:stop([Rep, Par]).
 
 %% Si el par responde un valor vencido, no se devuelve.
 respuesta_vencida_no_se_devuelve_test() ->
-    Rep = replica_con_par_falso(3),
+    {[Rep], [Par]} = replicas_con_pares_controlados(1, 1, 3),
     ok = get_async(Rep, k),
-    {Rep, RefConsulta} = esperar_consulta(k),
+    {Rep, RefConsulta} = esperar_consulta(Par, k),
     Vencido = {simple_kv_replicacion:nueva_version(),
                {valor, x, erlang:monotonic_time(millisecond) - 1}},
-    ok = responder_consulta(Rep, RefConsulta, {ok, Vencido}),
+    ok = responder_consulta(Rep, RefConsulta, Par, {ok, Vencido}),
     ?assertEqual(not_found, esperar_get(k)),
-    ok = simple_kv:stop([Rep]).
+    ok = simple_kv:stop([Rep, Par]).
 
 %% Si mientras espera llega el valor por replicacion, se usa ese
 %% (comparacion final con lo local).
 valor_que_llega_mientras_espera_test() ->
-    Rep = replica_con_par_falso(3),
+    {[Rep], [Par]} = replicas_con_pares_controlados(1, 1, 3),
     ok = get_async(Rep, k),
-    {Rep, RefConsulta} = esperar_consulta(k),
-    Rep ! {replicar, k, {simple_kv_replicacion:nueva_version(), {valor, llego, infinity}}},
-    ok = responder_consulta(Rep, RefConsulta, error),
+    {Rep, RefConsulta} = esperar_consulta(Par, k),
+    ok = simple_kv:put(Rep, k, llego),
+    ok = responder_consulta(Rep, RefConsulta, Par, error),
     ?assertEqual({ok, llego}, esperar_get(k)),
-    ok = simple_kv:stop([Rep]).
+    ok = simple_kv:stop([Rep, Par]).
 
 %% 5.2: mientras espera la respuesta de una consulta, la replica sigue
 %% atendiendo pedidos de clientes y consultas de otras replicas.
 replica_no_se_bloquea_mientras_consulta_test() ->
-    Rep = replica_con_par_falso(3),
+    {[Rep], [Par]} = replicas_con_pares_controlados(1, 1, 3),
     ok = get_async(Rep, pendiente),
-    {Rep, RefConsulta} = esperar_consulta(pendiente),
+    {Rep, RefConsulta} = esperar_consulta(Par, pendiente),
     %% todavia no respondimos la consulta
     ok = simple_kv:put(Rep, otra, 1),
     ?assertEqual({ok, 1}, simple_kv:get(Rep, otra)),
@@ -76,9 +76,9 @@ replica_no_se_bloquea_mientras_consulta_test() ->
         erlang:error(no_respondio_consulta)
     end,
     %% recien ahora respondemos la consulta original
-    ok = responder_consulta(Rep, RefConsulta, error),
+    ok = responder_consulta(Rep, RefConsulta, Par, error),
     ?assertEqual(not_found, esperar_get(pendiente)),
-    ok = simple_kv:stop([Rep]).
+    ok = simple_kv:stop([Rep, Par]).
 
 %% Una lectura en otra réplica devuelve la escritura recién confirmada.
 lectura_inmediata_en_otra_replica_test() ->
@@ -125,26 +125,20 @@ sin_deadlock_lecturas_cruzadas_test() ->
 
 %% El par controlado conserva la única copia, de igual versión que la marca de desalojo.
 get_recupera_valor_remoto_tras_desalojo_test() ->
-    Padre = self(),
-    Marca = make_ref(),
-    Entrada = {1, {valor, remoto, infinity}},
-    Par = spawn(fun() -> par_controlado(Padre, Marca, #{1 => Entrada}) end),
-    Pid = spawn_link(fun simple_kv_replica:init/0),
-    Pid ! {configurar, [Par], 16},
+    {[Rep], [Par]} = replicas_con_pares_controlados(1, 1, 16),
     try
-        Pid ! {replicar, 1, Entrada},
-        lists:foreach(
-            fun(N) -> Pid ! {replicar, N, {N, {valor, N, infinity}}} end,
-            lists:seq(2, 17)
-        ),
-        ?assertEqual({ok, {1, desalojado}}, consultar_local(Pid, 1)),
-        ?assertEqual({ok, remoto}, simple_kv:get(Pid, 1)),
-        receive {Marca, consultado, 1} -> ok
-        after 1000 -> erlang:error(no_consulto_al_par)
-        end
+        ok = simple_kv:put(Rep, 1, remoto),
+        escribir(Rep, lists:seq(2, 17)),
+        Entrada = receive {ofrecer, 1, {_, {valor, remoto, _}} = E} -> E
+                  after 1000 -> error(sin_oferta) end,
+        {Version, _} = Entrada,
+        ?assertEqual({ok, {Version, desalojado}}, consultar_local(Rep, 1)),
+        ok = get_async(Rep, 1),
+        {Rep, Ref} = esperar_consulta(Par, 1),
+        ok = responder_consulta(Rep, Ref, Par, {ok, Entrada}),
+        ?assertEqual({ok, remoto}, esperar_get(1))
     after
-        simple_kv:stop([Pid]),
-        exit(Par, kill)
+        simple_kv:stop([Rep, Par])
     end.
 
 %% Prueba interna: un par retiene las respuestas hasta observar dos consultas
@@ -152,19 +146,14 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
 consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
     Padre = self(),
     Marca = make_ref(),
-    ParDemorado = spawn(fun() -> retener_consultas(Padre, Marca, []) end),
-    P1 = spawn_link(fun simple_kv_replica:init/0),
-    P2 = spawn_link(fun simple_kv_replica:init/0),
-    P1 ! {configurar, [P2, ParDemorado], 16},
-    P2 ! {configurar, [P1, ParDemorado], 16},
+    {[P1, P2], [Par]} = replicas_con_pares_controlados(2, 1, 16),
     Clientes = [spawn(fun() ->
         Resultado = simple_kv:get(Pid, {ausente, N}),
         Padre ! {Marca, lectura, N, Resultado}
     end) || {Pid, N} <- [{P1, 1}, {P2, 2}]],
     try
-        receive {Marca, dos_pendientes} -> ok
-        after 1000 -> erlang:error(no_iniciaron_dos_consultas)
-        end,
+        {P1, Ref1} = esperar_consulta(Par, {ausente, 1}),
+        {P2, Ref2} = esperar_consulta(Par, {ausente, 2}),
         Escritor = spawn(fun() ->
             R = simple_kv:put(P1, disponible, dato),
             Padre ! {Marca, escritura, R}
@@ -175,47 +164,45 @@ consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
             end
         after exit(Escritor, kill)
         end,
-        ParDemorado ! {Marca, liberar},
+        ok = responder_consulta(P1, Ref1, Par, error),
+        ok = responder_consulta(P2, Ref2, Par, error),
         lists:foreach(fun(N) ->
             receive {Marca, lectura, N, R} -> ?assertEqual(not_found, R)
             after 1000 -> erlang:error(consulta_no_termino)
             end
         end, [1, 2])
     after
-        %% Liberar primero permite limpiar aun si falla una asercion.
-        ParDemorado ! {Marca, liberar},
         lists:foreach(fun(C) -> exit(C, kill) end, Clientes),
-        simple_kv:stop([P1, P2]),
-        exit(ParDemorado, kill)
+        simple_kv:stop([P1, P2, Par])
     end.
 
 %% El resultado de un get pendiente ignora referencias ajenas, pares ajenos y duplicados.
 consultas_filtran_respuestas_ajenas_y_duplicadas_test() ->
-    con_lectura_retenida(fun(P, Consulta, ParDemorado, Cliente) ->
+    con_lectura_retenida(fun(P, Consulta, Par, {ParDemorado, RefDemorada}, Cliente) ->
         Entrada = {1, {valor, remoto, infinity}},
-        P ! {respuesta_consulta, make_ref(), self(), {ok, {100, borrado}}},
+        P ! {respuesta_consulta, make_ref(), Par, {ok, {100, borrado}}},
         P ! {respuesta_consulta, Consulta, desconocido, {ok, {100, borrado}}},
-        P ! {respuesta_consulta, Consulta, self(), {ok, Entrada}},
-        P ! {respuesta_consulta, Consulta, self(), {ok, {100, borrado}}},
+        P ! {respuesta_consulta, Consulta, Par, {ok, Entrada}},
+        P ! {respuesta_consulta, Consulta, Par, {ok, {100, borrado}}},
         ?assertEqual(error, consultar_local(P, barrera)),
         receive
             {lectura, Cliente, Resultado} -> error({lectura_prematura, Resultado})
         after 20 -> ok
         end,
-        ParDemorado ! liberar,
+        ok = responder_consulta(P, RefDemorada, ParDemorado, error),
         ?assertEqual({ok, remoto}, esperar_lectura(Cliente))
     end).
 
 %% Un valor remoto que vence mientras falta otra respuesta no se devuelve.
 valor_remoto_vence_antes_de_finalizar_get_test() ->
-    con_lectura_retenida(fun(P, Consulta, ParDemorado, Cliente) ->
+    con_lectura_retenida(fun(P, Consulta, Par, {ParDemorado, RefDemorada}, Cliente) ->
         Vence = erlang:monotonic_time(millisecond) + 60,
-        P ! {respuesta_consulta, Consulta, self(), {ok, {1, {valor, temporal, Vence}}}},
+        P ! {respuesta_consulta, Consulta, Par, {ok, {1, {valor, temporal, Vence}}}},
         ?assertEqual(error, consultar_local(P, barrera)),
         Restante = Vence - erlang:monotonic_time(millisecond),
         ?assert(Restante > 0),
         timer:sleep(Restante + 20),
-        ParDemorado ! liberar,
+        ok = responder_consulta(P, RefDemorada, ParDemorado, error),
         ?assertEqual(not_found, esperar_lectura(Cliente))
     end).
 
@@ -240,56 +227,17 @@ replica_demorada_conserva_copia_para_get_test() ->
         simple_kv:stop(Pids)
     end.
 
-par_controlado(Padre, Marca, Valores) ->
-    receive
-        {consultar, Solicitante, Ref, Clave} ->
-            Padre ! {Marca, consultado, Clave},
-            Solicitante ! {respuesta_consulta, Ref, self(), maps:find(Clave, Valores)},
-            par_controlado(Padre, Marca, Valores)
-    end.
-
-retener_consultas(Padre, Marca, Acumuladas) ->
-    receive
-        {consultar, Solicitante, Ref, _Clave} ->
-            Nuevas = [{Solicitante, Ref} | Acumuladas],
-            case length(Nuevas) of
-                2 ->
-                    Padre ! {Marca, dos_pendientes},
-                    receive {Marca, liberar} ->
-                        lists:foreach(fun({P, R}) ->
-                            P ! {respuesta_consulta, R, self(), error}
-                        end, Nuevas)
-                    end;
-                _ -> retener_consultas(Padre, Marca, Nuevas)
-            end;
-        {Marca, liberar} ->
-            lists:foreach(fun({P, R}) ->
-                P ! {respuesta_consulta, R, self(), error}
-            end, Acumuladas)
-    end.
-
 con_lectura_retenida(Verificar) ->
-    ParDemorado = spawn(fun responder_al_liberar/0),
-    P = spawn_link(fun simple_kv_replica:init/0),
-    P ! {configurar, [self(), ParDemorado], 3},
+    {[P], [Par, ParDemorado]} = replicas_con_pares_controlados(1, 2, 3),
     Padre = self(),
     Cliente = spawn(fun() -> Padre ! {lectura, self(), simple_kv:get(P, k)} end),
     try
-        Consulta = receive
-            {consultar, P, Ref, k} -> Ref
-        after 1000 -> error(sin_consulta)
-        end,
-        Verificar(P, Consulta, ParDemorado, Cliente)
+        {P, Consulta} = esperar_consulta(Par, k),
+        {P, RefDemorada} = esperar_consulta(ParDemorado, k),
+        Verificar(P, Consulta, Par, {ParDemorado, RefDemorada}, Cliente)
     after
         exit(Cliente, kill),
-        exit(ParDemorado, kill),
-        simple_kv:stop([P])
-    end.
-
-responder_al_liberar() ->
-    receive
-        {consultar, P, Ref, k} ->
-            receive liberar -> P ! {respuesta_consulta, Ref, self(), error} end
+        simple_kv:stop([P, Par, ParDemorado])
     end.
 
 esperar_lectura(Cliente) ->

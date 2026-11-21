@@ -1,7 +1,8 @@
 # Cupo duro de metadata con transacciones por clave
 
-Especificación propuesta para el TP de PCP. Parte del protocolo del cupo
-experimental y reemplaza el recorte por antigüedad por recolección confirmada.
+Diseño implementado para el TP de PCP. Las reservas acotan el crecimiento de
+metadata de `main` y la recolección confirmada evita olvidar marcas que todavía
+protegen contra mensajes demorados.
 
 ## 1. Contrato
 
@@ -92,20 +93,23 @@ confirmación se cuenta una sola vez, por réplica o por referencia de envío.
 
 | Mensaje lógico | Emisor → receptor | Efecto |
 | --- | --- | --- |
-| `pedir_cupo(Clave, RefPedido)` | Réplica → coordinador | Solicita admisión del cambio. El pedido de cliente espera en su réplica. |
-| `permitir(Clave, Reserva, IdCambio, RefPedido)` | Coordinador → réplica | Reserva la clave o autoriza el uso de su entrada existente. |
+| `pedir_cupo(Cliente, RefPedido, Clave)` | Réplica → coordinador | La réplica reenvía el pedido del cliente. |
+| `{RefPedido, permiso, Reserva, IdCambio}` | Coordinador → cliente | Concede el permiso para enviar el cambio a su réplica. |
 | `replicar(Clave, Reserva, IdCambio, Entrada)` | Origen → pares | Aplica el valor o borrado versionado usando las reglas actuales. |
 | `ofrecer(Clave, Reserva, IdCambio, RefOferta, Entrada)` | Réplica que desaloja → par | Ofrece la copia vigente. Cada destinatario tiene su propia referencia de envío. |
 | `aplicado(IdCambio, Replica, Altas, Bajas, Ofertas)` | Cada réplica → coordinador | Confirma el resultado local del cambio, incluidos los desalojos y los envíos que generó. |
-| `oferta_resuelta(IdCambio, RefOferta, Replica, Resultado, Altas, Bajas)` | Receptor de oferta → coordinador | Informa si quedó una copia y actualiza la residencia de las claves afectadas. |
+| `oferta_resuelta(IdCambio, RefOferta, Replica, Altas, Bajas)` | Receptor de oferta → coordinador | Informa si quedó una copia y actualiza la residencia de las claves afectadas. |
 | `preparar_olvido(Clave, Reserva)` | Coordinador → réplicas | Deja la clave en cierre y da tiempo a que terminen las consultas pendientes de esa clave. |
 | `lecturas_drenadas(Clave, Reserva, Replica)` | Cada réplica → coordinador | Confirma que terminó sus lecturas anteriores y que pospone nuevas consultas para esa clave. |
 | `olvidar(Clave, Reserva)` | Coordinador → réplicas | Elimina la metadata de esa reserva. |
 | `olvidada(Clave, Reserva, Replica)` | Cada réplica → coordinador | Confirma la eliminación. El coordinador devuelve el cupo al recibir todas. |
 
-La admisión es un intercambio interno de la API. El cliente puede conservar
-el valor de su `put` hasta que la réplica le comunique el permiso, para evitar
-guardar valores a la espera de cupo en una estructura auxiliar de la réplica.
+La admisión es un intercambio interno de la API. El cliente conserva el valor
+del `put` hasta recibir el permiso. En ese momento manda
+`{cambiar, Cliente, RefPedido, Clave, Reserva, IdCambio, Contenido}` a su réplica.
+Al iniciar se configura cada réplica con su capacidad, pares y coordinador.
+Al terminar, cada réplica notifica al coordinador con `{detener, Replica}`.
+La última espera su salida.
 
 `Altas` y `Bajas` informan cambios en la **presencia física** de claves en el
 mapa, sin transportar sus valores. Un vencido que todavía ocupa plaza cuenta
@@ -118,8 +122,8 @@ antes de evaluar si alguna clave se puede recolectar.
 
 El `delete(k)` instala `{V, borrado}` y libera la plaza local. Cada réplica
 confirma que procesó ese borrado después de aplicar `V` o preservar una versión
-posterior que ya conocía. La marca queda disponible para rechazar una oferta anterior que
-todavía esté en camino. Las confirmaciones de aplicación **y** el registro de
+posterior que ya conocía. La marca queda disponible para rechazar una oferta
+anterior que todavía esté en camino. Las confirmaciones de aplicación **y** el registro de
 envíos pendientes son necesarios antes de iniciar el olvido. Si queda un
 residente de una versión posterior, se conserva la entrada de esa clave.
 
@@ -138,7 +142,8 @@ metadata. El resultado es el retiro de la reserva que quedó sin copias. Un
 El coordinador inicia `preparar_olvido` cuando no hay copias reportadas, no
 queda un cambio admitido para la clave y cerraron sus transferencias. Desde
 ese momento retiene la reserva y deja en espera los permisos para esa clave.
-Cada réplica pospone nuevas consultas de cliente sobre la clave, mantiene su
+Si llega un `get` nuevo para esta clave durante el cierre, la réplica responde
+`not_found` localmente porque la ausencia global ya fue comprobada. Mantiene su
 marca mientras terminan las lecturas anteriores y sigue contestando las
 consultas que ya le enviaron sus pares. Las operaciones de otras claves siguen
 su curso.
@@ -210,9 +215,11 @@ un `put` de otra clave y queda demorado justo antes de enviar su oferta vieja.
    `put(k, azul)` vuelve a crearla con una versión mayor y obtiene su propio
    permiso. El mensaje viejo nunca recupera `rojo`.
 
-La implementación deberá cubrir como mínimo estos escenarios con `start_link`,
-`put`, `delete`, `get` y `stop` reales. Se puede controlar la planificación de
-las réplicas para reproducir el orden adverso.
+La suite cubre estos escenarios con `start_link`, `put`, `delete`, `get` y
+`stop`. Los casos adversos usan operaciones de la API y controlan la
+planificación de las réplicas con el depurador de OTP. En la prueba de lectura
+pendiente, un par controlado retiene una respuesta de consulta y sigue
+participando en el protocolo de cupos.
 
 - Dos `put` sobre claves distintas con espacio. Se admiten en paralelo y se
   conservan ambos valores si caben. Con dos escrituras sobre la misma clave

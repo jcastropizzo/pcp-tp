@@ -41,8 +41,8 @@ loop(Replicas, Limite, Cupos, Cambios) ->
 
         {oferta_resuelta, Id, Ref, Replica, Altas, Bajas} ->
             case maps:find(Id, Cambios) of
-                {ok, #cambio{ofertas = Envios} = Cambio} when map_get(Ref, Envios) =:= resuelta ->
-                    loop(Replicas, Limite, Cupos, Cambios#{Id => Cambio});
+                {ok, #cambio{ofertas = Envios}} when map_get(Ref, Envios) =:= resuelta ->
+                    loop(Replicas, Limite, Cupos, Cambios);
                 {ok, #cambio{ofertas = Envios} = Cambio} ->
                     %% El resultado puede llegar antes del informe que enumera la oferta.
                     Nuevos = registrar_residencia(Replica, Altas, Bajas, Cupos),
@@ -65,7 +65,11 @@ loop(Replicas, Limite, Cupos, Cambios) ->
                 Restantes ->
                     Replica ! {detenida, self()},
                     loop(Restantes, Limite, Cupos, Cambios)
-            end
+            end;
+
+        %% Dejar en el buzón únicamente los pedidos de cupo que aún esperan.
+        Otro when not is_tuple(Otro); tuple_size(Otro) =/= 4; element(1, Otro) =/= pedir_cupo ->
+            loop(Replicas, Limite, Cupos, Cambios)
     end.
 
 registrar_ofertas(Ofertas, Envios) ->

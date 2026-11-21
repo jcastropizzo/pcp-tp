@@ -1,7 +1,7 @@
 -module(simple_kv_test_utils).
--export([esperar_valor/4, iniciar/2, replica_con_par_falso/1, escribir/2,
+-export([esperar_valor/4, iniciar/2, replicas_con_pares_controlados/3, escribir/2,
          lecturas/2, consultar_local/2, get_async/2, esperar_get/1,
-         esperar_consulta/1, responder_consulta/3]).
+         esperar_consulta/2, responder_consulta/4, esperar/1]).
 -include_lib("eunit/include/eunit.hrl").
 
 obtener_plazo_ms(Ms)->erlang:monotonic_time(millisecond) + Ms.
@@ -29,11 +29,47 @@ iniciar(N, Alfa) ->
     {ok, Pids} = simple_kv:start_link(N, Alfa),
     Pids.
 
-%% Replica cuyo unico par es el proceso del test.
-replica_con_par_falso(Alfa) ->
-    Rep = spawn_link(fun simple_kv_replica:init/0),
-    Rep ! {configurar, [self()], Alfa},
-    Rep.
+%% Los pares controlados participan del protocolo de cupos. El test decide
+%% las respuestas de lectura y puede observar las ofertas reales.
+replicas_con_pares_controlados(Reales, Simulados, Alfa) ->
+    Padre = self(),
+    Replicas = [spawn_link(fun simple_kv_replica:init/0) || _ <- lists:seq(1, Reales)],
+    Pares = [spawn_link(fun() ->
+        receive {configurar, Cupos} -> par_controlado(Padre, Cupos, Alfa, #{}) end
+    end) || _ <- lists:seq(1, Simulados)],
+    Todos = Replicas ++ Pares,
+    Cupos = spawn_link(fun() -> simple_kv_cupos:init(Todos, Alfa) end),
+    lists:foreach(fun(P) -> P ! {configurar, lists:delete(P, Todos), Alfa, Cupos} end, Replicas),
+    lists:foreach(fun(P) -> P ! {configurar, Cupos} end, Pares),
+    {Replicas, Pares}.
+
+par_controlado(Padre, Cupos, Alfa, Residentes) ->
+    receive
+        {replicar, Clave, _, Id, {_, borrado}} ->
+            Bajas = [Clave || is_map_key(Clave, Residentes)],
+            Cupos ! {aplicado, Id, self(), [], Bajas, []},
+            par_controlado(Padre, Cupos, Alfa, maps:remove(Clave, Residentes));
+        {replicar, _, _, Id, _} ->
+            Cupos ! {aplicado, Id, self(), [], [], []},
+            par_controlado(Padre, Cupos, Alfa, Residentes);
+        {ofrecer, Clave, _, Id, Ref, Entrada} ->
+            Padre ! {ofrecer, Clave, Entrada},
+            Altas = [Clave || not is_map_key(Clave, Residentes), map_size(Residentes) < Alfa],
+            Cupos ! {oferta_resuelta, Id, Ref, self(), Altas, []},
+            Nuevos = lists:foldl(fun(K, M) -> M#{K => true} end, Residentes, Altas),
+            par_controlado(Padre, Cupos, Alfa, Nuevos);
+        {consultar, Rep, Ref, Clave} ->
+            Padre ! {consulta, self(), Rep, Ref, Clave},
+            par_controlado(Padre, Cupos, Alfa, Residentes);
+        {preparar_olvido, Clave, Reserva} ->
+            Cupos ! {lecturas_drenadas, Clave, Reserva, self()},
+            par_controlado(Padre, Cupos, Alfa, Residentes);
+        {olvidar, Clave, Reserva} ->
+            Cupos ! {olvidada, Clave, Reserva, self()},
+            par_controlado(Padre, Cupos, Alfa, Residentes);
+        stop ->
+            simple_kv_cupos:detener_replica(Cupos)
+    end.
 
 escribir(P, Claves) ->
     lists:foreach(fun(Clave) -> ok = simple_kv:put(P, Clave, Clave) end, Claves).
@@ -63,14 +99,25 @@ esperar_get(Clave) ->
         erlang:error({get_sin_respuesta, Clave})
     end.
 
-%% Espera el {consultar, ...} que la replica le manda al par falso.
-esperar_consulta(Clave) ->
+esperar_consulta(Par, Clave) ->
     receive
-        {consultar, Rep, RefConsulta, Clave} -> {Rep, RefConsulta}
+        {consulta, Par, Rep, RefConsulta, Clave} -> {Rep, RefConsulta}
     after 1000 ->
         erlang:error({sin_consulta, Clave})
     end.
 
-responder_consulta(Rep, RefConsulta, Resultado) ->
-    Rep ! {respuesta_consulta, RefConsulta, self(), Resultado},
+responder_consulta(Rep, RefConsulta, Par, Resultado) ->
+    Rep ! {respuesta_consulta, RefConsulta, Par, Resultado},
     ok.
+
+esperar(Condicion) ->
+    esperar(Condicion, erlang:monotonic_time(millisecond) + 1500).
+
+esperar(Condicion, Plazo) ->
+    case Condicion() of
+        true -> ok;
+        false ->
+            ?assert(erlang:monotonic_time(millisecond) < Plazo),
+            timer:sleep(1),
+            esperar(Condicion, Plazo)
+    end.

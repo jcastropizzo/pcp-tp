@@ -83,7 +83,8 @@ terminos_compuestos_y_enlaces_test() ->
 init_descarta_mensajes_test() ->
     P = spawn_link(fun simple_kv_replica:init/0),
     P ! inesperado_antes_de_configurar,
-    P ! {configurar, [], 3},
+    Cupos = spawn_link(fun() -> simple_kv_cupos:init([P], 3) end),
+    P ! {configurar, [], 3, Cupos},
     try
         ?assertEqual(not_found, simple_kv:get(P, ausente)),
         ?assertEqual({messages, []}, process_info(P, messages))
