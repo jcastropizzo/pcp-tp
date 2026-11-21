@@ -2,12 +2,15 @@
 -include_lib("eunit/include/eunit.hrl").
 -import(simple_kv_test_utils, [iniciar/2, replica_con_par_falso/1, escribir/2,
                               lecturas/2, consultar_local/2, get_async/2,
-                              esperar_get/1, esperar_consulta/1, responder_consulta/3]).
+                              esperar_get/1, esperar_consulta/1, responder_consulta/3,
+                              cerrar_tanda_par_falso/2]).
 
 %% Un valor desalojado localmente se recupera desde otra replica.
 lee_valor_desalojado_desde_otra_replica_test() ->
     Rep = replica_con_par_falso(3),
-    escribir(Rep, [1, 2, 3, 4]),
+    escribir(Rep, [1, 2, 3]),
+    ok = cerrar_tanda_par_falso(Rep, [1]),
+    escribir(Rep, [4]),
     Entry1 = receive {ofrecer, 1, E} -> E after 1000 -> erlang:error(sin_oferta) end,
     ok = get_async(Rep, 1),
     {Rep, RefConsulta} = esperar_consulta(1),
@@ -28,7 +31,9 @@ clave_desconocida_test() ->
 %% mas alta: si el par tiene un borrado mas nuevo, el resultado es not_found.
 gana_la_version_mas_alta_test() ->
     Rep = replica_con_par_falso(3),
-    escribir(Rep, [1, 2, 3, 4]),
+    escribir(Rep, [1, 2, 3]),
+    ok = cerrar_tanda_par_falso(Rep, [1]),
+    escribir(Rep, [4]),
     ok = get_async(Rep, 1),
     {Rep, RefConsulta} = esperar_consulta(1),
     BorradoNuevo = {simple_kv_replicacion:nueva_version(), borrado},
@@ -129,7 +134,7 @@ get_recupera_valor_remoto_tras_desalojo_test() ->
     Marca = make_ref(),
     Entrada = {1, {valor, remoto, infinity}},
     Par = spawn(fun() -> par_controlado(Padre, Marca, #{1 => Entrada}) end),
-    Pid = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
+    Pid = spawn_link(fun simple_kv_replica:init/0),
     Pid ! {configurar, [Par], 16},
     try
         Pid ! {replicar, 1, Entrada},
@@ -153,8 +158,8 @@ consultas_simultaneas_siguen_atendiendo_pedidos_test() ->
     Padre = self(),
     Marca = make_ref(),
     ParDemorado = spawn(fun() -> retener_consultas(Padre, Marca, []) end),
-    P1 = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
-    P2 = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
+    P1 = spawn_link(fun simple_kv_replica:init/0),
+    P2 = spawn_link(fun simple_kv_replica:init/0),
     P1 ! {configurar, [P2, ParDemorado], 16},
     P2 ! {configurar, [P1, ParDemorado], 16},
     Clientes = [spawn(fun() ->
@@ -273,7 +278,7 @@ retener_consultas(Padre, Marca, Acumuladas) ->
 
 con_lectura_retenida(Verificar) ->
     ParDemorado = spawn(fun responder_al_liberar/0),
-    P = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
+    P = spawn_link(fun simple_kv_replica:init/0),
     P ! {configurar, [self(), ParDemorado], 3},
     Padre = self(),
     Cliente = spawn(fun() -> Padre ! {lectura, self(), simple_kv:get(P, k)} end),

@@ -2,12 +2,14 @@
 -include_lib("eunit/include/eunit.hrl").
 -import(simple_kv_test_utils, [replica_con_par_falso/1, escribir/2, lecturas/2,
                               consultar_local/2, get_async/2, esperar_get/1,
-                              esperar_consulta/1, responder_consulta/3]).
+                              esperar_consulta/1, responder_consulta/3, cerrar_tanda_par_falso/2]).
 
 %% Con todos los valores vigentes, la réplica ofrece el de menor versión.
 desalojo_ofrece_el_valor_test() ->
     Rep = replica_con_par_falso(3),
-    escribir(Rep, [1, 2, 3, 4]),
+    escribir(Rep, [1, 2, 3]),
+    ok = cerrar_tanda_par_falso(Rep, []),
+    escribir(Rep, [4]),
     receive
         {ofrecer, Clave, {_Version, {valor, Valor, _Vence}}} ->
             ?assertEqual(1, Clave),
@@ -29,6 +31,7 @@ oferta_aceptada_con_lugar_test() ->
 oferta_rechazada_sin_lugar_test() ->
     Rep = replica_con_par_falso(3),
     escribir(Rep, [1, 2, 3]),
+    ok = cerrar_tanda_par_falso(Rep, []),
     Entrada = {simple_kv_replicacion:nueva_version(), {valor, ofrecido, infinity}},
     Rep ! {ofrecer, k, Entrada},
     %% como no la guardo, el get de k tiene que consultar al par
@@ -61,11 +64,12 @@ oferta_vieja_no_revive_borrado_test() ->
 
 %% Un vencido que sale del mapa no se ofrece al par.
 no_se_ofrece_un_vencido_al_desalojarlo_test() ->
-    P = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
-    P ! {configurar, [self()], 3},
+    P = replica_con_par_falso(3),
     try
         ok = simple_kv:put(P, vencido, descartado, 0),
-        escribir(P, [a, b, c]),
+        escribir(P, [a, b]),
+        ok = cerrar_tanda_par_falso(P, []),
+        escribir(P, [c]),
         ?assertNotMatch({ok, {_, {valor, _, _}}}, consultar_local(P, vencido)),
         receive
             {ofrecer, vencido, Entrada} -> error({ofrecio_vencido, Entrada})
@@ -77,13 +81,13 @@ no_se_ofrece_un_vencido_al_desalojarlo_test() ->
 
 %% Una oferta puede reutilizar un vencido elegible, sin desalojar vigentes ni reenviar ofertas.
 oferta_reutiliza_vencido_elegible_test() ->
-    P = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
-    P ! {configurar, [self()], 4},
+    P = replica_con_par_falso(4),
     try
         Inicio = simple_kv_replicacion:nueva_version(),
         escribir(P, [a]),
         ok = simple_kv:put(P, b, vencido, 0),
         escribir(P, [c, d]),
+        ok = cerrar_tanda_par_falso(P, []),
         P ! {ofrecer, e, {simple_kv_replicacion:nueva_version(), {valor, e, infinity}}},
         ?assertMatch({ok, {_, desalojado}}, consultar_local(P, b)),
         P ! {ofrecer, f, {simple_kv_replicacion:nueva_version(), {valor, f, infinity}}},

@@ -13,13 +13,10 @@
 
 nueva(Numero) -> #tanda{numero = Numero}.
 
-estado(sin_tandas) -> {0, abierta};
 estado(#tanda{numero = Numero, fase = Fase}) -> {Numero, Fase}.
 
-admitir_cambio(sin_tandas) -> sin_tandas;
 admitir_cambio(#tanda{operaciones = N} = Tanda) -> Tanda#tanda{operaciones = N + 1}.
 
-recibir(_Par, _Evento, _Datos, sin_tandas) -> sin_tandas;
 recibir(Par, actualizaciones, ok, Tanda) ->
     Tanda#tanda{fin_actualizaciones = (Tanda#tanda.fin_actualizaciones)#{Par => true}};
 recibir(Par, ofertas, ok, Tanda) ->
@@ -32,8 +29,6 @@ recibir(_Par, _Evento, _Datos, Tanda) -> Tanda.
 
 %% Pares excluye a self(). Los mapas de avisos guardan un registro por par.
 %% Cada transición puede avanzar sin otro mensaje (p. ej. con una sola réplica).
-avanzar(sin_tandas, _Pares, _Alfa, _Valores, {Metadatos, _Pendientes}) ->
-    {sin_tandas, Metadatos};
 avanzar(#tanda{fase = abierta, operaciones = N, fin_actualizaciones = Avisos} = Tanda,
         Pares, Alfa, Valores, Estado) when N >= Alfa; map_size(Avisos) > 0 ->
     avisar(Pares, Tanda, actualizaciones, ok),

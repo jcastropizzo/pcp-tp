@@ -1,7 +1,7 @@
 -module(simple_kv_test_utils).
 -export([esperar_valor/4, iniciar/2, replica_con_par_falso/1, escribir/2,
          lecturas/2, consultar_local/2, get_async/2, esperar_get/1,
-         esperar_consulta/1, responder_consulta/3]).
+         esperar_consulta/1, responder_consulta/3, cerrar_tanda_par_falso/2]).
 -include_lib("eunit/include/eunit.hrl").
 
 obtener_plazo_ms(Ms)->erlang:monotonic_time(millisecond) + Ms.
@@ -31,9 +31,29 @@ iniciar(N, Alfa) ->
 
 %% Replica cuyo unico par es el proceso del test.
 replica_con_par_falso(Alfa) ->
-    Rep = spawn_link(fun simple_kv_replica:init_sin_tandas/0),
+    Rep = spawn_link(fun simple_kv_replica:init/0),
     Rep ! {configurar, [self()], Alfa},
     Rep.
+
+%% El proceso del test es el único par. Responde a cada fase después de
+%% recibir su aviso, sin consumir los mensajes de replicación u oferta.
+cerrar_tanda_par_falso(Rep, Claves) ->
+    Tanda = receive
+        {tanda, N, Rep, actualizaciones, ok} -> N
+    after 1000 -> error({sin_aviso_de_tanda, actualizaciones})
+    end,
+    Rep ! {tanda, Tanda, self(), actualizaciones, ok},
+    confirmar_aviso(Rep, Tanda, ofertas, ok),
+    confirmar_aviso(Rep, Tanda, residentes, Claves),
+    confirmar_aviso(Rep, Tanda, compactada, ok).
+
+confirmar_aviso(Rep, Tanda, Fase, Datos) ->
+    receive
+        {tanda, Tanda, Rep, Fase, _} ->
+            Rep ! {tanda, Tanda, self(), Fase, Datos},
+            ok
+    after 1000 -> error({sin_aviso_de_tanda, Fase})
+    end.
 
 escribir(P, Claves) ->
     lists:foreach(fun(Clave) -> ok = simple_kv:put(P, Clave, Clave) end, Claves).

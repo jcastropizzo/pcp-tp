@@ -1,12 +1,6 @@
 -module(simple_kv_replica).
 -export([init/0]).
 
--ifdef(TEST).
--export([init_sin_tandas/0]).
-%% Los pares simulados de las pruebas unitarias no participan en barreras.
-init_sin_tandas() -> configurar(sin_tandas).
--endif.
-
 -define(MENSAJE(M, Tipo, Aridad),
         (is_tuple(M) andalso tuple_size(M) =:= Aridad andalso element(1, M) =:= Tipo)).
 -define(LECTURA_LOCAL(K, Pares, Meta),
@@ -21,11 +15,10 @@ init_sin_tandas() -> configurar(sin_tandas).
 %%   Tanda      : número, fase, cupo usado y avisos recibidos
 %%   Pendientes : RefConsulta => {Cliente, RefCliente, Clave, Faltan, Mejor}  (lecturas en curso, §4.8)
 
-init() -> configurar(simple_kv_tandas:nueva(0)).
-
-configurar(Tanda) ->
+init() ->
     receive
-        {configurar, Pares, Alfa} -> loop(Pares, Alfa, #{}, #{}, #{}, #{}, Tanda)
+        {configurar, Pares, Alfa} ->
+            loop(Pares, Alfa, #{}, #{}, #{}, #{}, simple_kv_tandas:nueva(0))
     end.
 
 continuar(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes, Tanda) ->
