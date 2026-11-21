@@ -1,5 +1,6 @@
 -module(simple_kv_almacen).
--export([buscar_local/3, registrar_metadatos/3, aplicar_actualizacion/4, version_no_obsoleta/3]).
+-export([buscar_local/3, registrar_metadatos/3, aplicar_actualizacion/4, version_no_obsoleta/3,
+         cupo_metadatos/2, limitar_metadatos/3]).
 
 buscar_local(Clave, Valores, Metadatos) ->
     case maps:find(Clave, Metadatos) of
@@ -58,4 +59,30 @@ version_no_obsoleta(Clave, {VersionNueva, _Contenido}, Metadatos) ->
     case maps:find(Clave, Metadatos) of
         error -> true;
         {ok, {VersionActual, _Estado}} -> VersionNueva >= VersionActual
+    end.
+
+%% Heuristica de tamano pensada para alfas y cantidades de peers chicos.
+%% Para alfas grandes probablemente haya que reevaluar el presupuesto de
+%% memoria y el costo del recorte. No garantiza seguridad de los borrados.
+%% Los peers excluyen al nodo local; sin peers se conserva al menos alfa.
+-spec cupo_metadatos(non_neg_integer(), pos_integer()) -> pos_integer().
+cupo_metadatos(CantidadPeers, Alfa) when
+    is_integer(CantidadPeers), CantidadPeers >= 0, is_integer(Alfa), Alfa > 0 ->
+    max(1, CantidadPeers) * Alfa.
+
+%% Cupo experimental: siempre conserva la metadata de valores residentes y
+%% completa con las marcas de mayor version. No demuestra que las otras sean
+%% prescindibles frente a mensajes demorados: ver docs/metadata_cupo.md.
+limitar_metadatos(Limite, Valores, Metadatos) when Limite >= map_size(Valores) ->
+    case map_size(Metadatos) =< Limite of
+        true -> Metadatos;
+        false ->
+            Residentes = maps:with(maps:keys(Valores), Metadatos),
+            Marcas = maps:without(maps:keys(Valores), Metadatos),
+            Ordenadas = lists:reverse(lists:sort(
+                [{Version, Clave, Estado} || {Clave, {Version, Estado}} <- maps:to_list(Marcas)])),
+            Conservar = lists:sublist(Ordenadas, Limite - map_size(Residentes)),
+            lists:foldl(fun({Version, Clave, Estado}, Acc) ->
+                maps:put(Clave, {Version, Estado}, Acc)
+            end, Residentes, Conservar)
     end.

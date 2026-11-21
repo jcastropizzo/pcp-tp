@@ -2,20 +2,31 @@
 
 Programación Concurrente y Paralela · Segundo cuatrimestre de 2026
 
+> **Variante experimental al 20/11/2026.** Se limita la metadata con
+> `cupo_metadatos/2`: `max(1, cantidad_de_peers) * Alfa`. Se preservan las
+> entradas de valores residentes y las marcas mas nuevas que entren en el
+> cupo. La heuristica se penso para alfas y cantidades de peers chicos;
+> para alfas grandes se debe reevaluar memoria y costo del recorte. No es
+> una recoleccion segura: olvidar una marca puede revivir un dato borrado.
+> La suite actual tiene 85 aprobados y 8 fallidos de 93; no es una version
+> lista para reentrega. La [cronologia detallada](docs/metadata_cupo.md)
+> distingue la cota de espacio de las garantias que quedan incumplidas.
+> El PDF existente corresponde a la entrega original y no fue regenerado.
+
 ## 1. Estado de cada réplica
 
 Cada réplica es un proceso enlazado al invocante de `start_link/2`. Recibe los pids de sus pares y la capacidad α. El estado pasa por los argumentos de su ciclo de recepción.
 
 - `Valores` guarda hasta α asociaciones `Clave => {Version, {valor, Valor, Vence}}`. Cada clave ocupa a lo sumo una plaza.
-- `Metadatos` guarda la mayor versión aplicada de cada clave y su estado, `valor`, `borrado` o `desalojado`. Las marcas sobreviven a la salida del valor y permiten rechazar mensajes obsoletos.
+- `Metadatos` guarda la mayor versión aplicada de cada clave y su estado, `valor`, `borrado` o `desalojado`. Las marcas sobreviven a la salida del valor mientras entren en el cupo; solo durante esa retencion permiten rechazar mensajes obsoletos. El cupo no modifica el mapa de valores ni el ranking protegido.
 - `Recientes` registra claves y versiones de las últimas escrituras conocidas que definen la protección de capacidad. La cantidad de registros está acotada por el cupo protegido.
 - `Pendientes` registra cada lectura en curso, su cliente, la clave, los pares que todavía deben contestar y el mejor candidato transitorio. La entrada se elimina al responder. Solo `Valores` se usa como almacenamiento de la base de datos.
 
 ## 2. Versiones, conflictos y borrados
 
-Cada escritura o borrado recibe una versión de `erlang:unique_integer([monotonic])`. Dentro de la única VM BEAM, las versiones son únicas y crecientes. Una réplica compara la versión entrante con la mayor que conoce para esa clave. El máximo es independiente del orden de entrega. Una marca de borrado conserva su versión aunque se haya liberado la plaza. Un `put` anterior queda descartado y uno posterior puede volver a crear la clave.
+Cada escritura o borrado recibe una versión de `erlang:unique_integer([monotonic])`. Dentro de la única VM BEAM, las versiones son únicas y crecientes. Una réplica compara la versión entrante con la mayor que conoce para esa clave. Mientras se conserva la version maxima de la clave, la comparacion es independiente del orden de entrega. Una marca de borrado conserva su version al liberar la plaza, pero el recorte puede eliminarla despues. Un `put` anterior se descarta mientras la marca exista; si fue eliminada puede revivir el dato. Una escritura posterior puede recrear la clave legitimamente.
 
-Un desalojo conserva la versión como marca `desalojado`. Una copia de esa misma versión puede recuperarse por consulta o volver a ocupar una plaza. Esto permite distinguir la falta de una copia local del borrado de la clave.
+Un desalojo conserva la version como marca `desalojado` mientras entre en el cupo. Una copia de esa misma versión puede recuperarse por consulta o volver a ocupar una plaza. Esto permite distinguir la falta de una copia local del borrado de la clave.
 
 ## 3. Vencimiento
 
@@ -58,9 +69,9 @@ Si la réplica tiene un valor o un borrado, usa esa información. Si desconoce l
 
 La réplica sigue atendiendo durante la espera y cada consulta entre pares se responde en un solo paso local. Bajo los supuestos de procesos vivos, entrega y ejecución eventual, no se forma una dependencia circular. El candidato en `Pendientes` existe durante ese pedido y solo interviene en su respuesta. Los demás pedidos consultan su propia información local y, si hace falta, inician su propia lectura.
 
-Después de que cesan las escrituras y se procesan las actualizaciones y ofertas, todas las réplicas conocen la mayor versión por clave. Si la versión ganadora es un borrado o está vencida, la lectura da `not_found`. Si una réplica conserva una copia vigente, las que la desalojaron pueden obtenerla por consulta. Si se perdió la última copia, todas devuelven `not_found`. Los mapas locales pueden diferir según el momento del desalojo. Las lecturas a lados distintos del instante de expiración pueden observar resultados distintos.
+En la entrega original, la conservacion indefinida de la mayor version por clave sustentaba el argumento de convergencia observable. El cupo experimental rompe esa premisa: despues de que cesen las escrituras y se procesen todos los mensajes, puede quedar un valor resucitado por una escritura u oferta anterior al borrado. Esperar la propagacion no lo corrige. Por lo tanto no se afirma convergencia correcta ni preservacion general del borrado para esta variante. El TTL se sigue verificando al responder y el cupo de valores y el ranking protegido se mantienen, pero no alcanzan para suplir la version olvidada.
 
-Las pruebas incluyen versiones en órdenes opuestos, borrados atrasados, ofertas, consultas concurrentes, TTL durante una consulta y desalojo asimétrico entre dos réplicas. Verifican escenarios concretos. Los argumentos anteriores cubren el diseño bajo los supuestos de la consigna.
+Las pruebas incluyen versiones en órdenes opuestos, borrados atrasados, ofertas, consultas concurrentes, TTL durante una consulta y desalojo asimétrico entre dos réplicas. Verifican escenarios concretos. Los argumentos de la entrega original dependian de conservar las marcas. Las dos regresiones nuevas de borrado quedan fallando y exponen la limitacion actual; las mediciones de tamano solo acreditan el cupo.
 
 ## 7. Ejemplos de lectura y desalojo
 

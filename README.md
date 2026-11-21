@@ -4,6 +4,34 @@
 
 **Entrega** el 11/11/2026 a las 23:59 mediante push al repositorio asignado por la cátedra, con ambos integrantes registrados. El coloquio figura para el 18/11, a acordar con cada grupo.
 
+## Experimento de metadata · 20/11/2026
+
+Se aplica por replica el cupo `simple_kv_almacen:cupo_metadatos/2`:
+`max(1, cantidad_de_peers) * Alfa`. Los peers excluyen al nodo local; el
+minimo Alfa conserva la metadata de sus valores residentes en un nodo solo.
+La funcion documenta que esta heuristica de tamano esta pensada para alfas y
+cantidades de peers chicos; para alfas grandes hay que reevaluar memoria y
+costo del recorte. El cupo es de entradas, no de bytes.
+
+Siempre se conserva la metadata de valores residentes y se completa el cupo
+con las marcas de mayor version. Esto limita el crecimiento, pero **no resuelve
+la seguridad del borrado ante escrituras u ofertas viejas**. No esta listo
+para reentrega. [Regla, cronologia y contraejemplo](docs/metadata_cupo.md).
+
+Con tres replicas, Alfa = 4 y cinco tandas de doce claves, la metadata queda
+en 8 por replica en ambas mediciones. `Recientes` queda en 3; los valores
+quedan en 4 con desalojos y en 0 con borrados.
+
+**Verificacion de esta variante:** compilacion sin advertencias;
+85 pruebas aprobadas y 8 fallidas de 93. Dos fallos nuevos muestran la
+resurreccion de un borrado por escritura u oferta vieja. Seis pruebas
+anteriores tambien fallan porque el cupo elimina marcas que esperaban
+observar. Se conservan sus expectativas, sin ocultar esos fallos.
+
+La tabla siguiente y el PDF enlazado al principio describen la entrega
+original; no acreditan la correccion de esta variante. El informe fuente
+explicita la limitacion actual. Trabajo aislado en una rama y PR experimental; no implica reentrega ni integracion en main.
+
 ## Requisitos y estado
 
 | Consigna | Estado | Evidencia |
@@ -32,6 +60,6 @@ rebar3 compile
 rebar3 eunit
 ```
 
-**Resultado observado en una copia limpia de la versión de cierre:** 83/83 tests EUnit y compilación sin advertencias.
+**Resultado historico de la entrega original:** 83/83 tests EUnit y compilacion sin advertencias. Para la variante actual, ver el estado experimental de arriba: la suite completa falla.
 
 La compilación directa se verifica con `erlc +warn_all -Werror -o <directorio-temporal> src/*.erl test/*.erl`. Se asume una sola BEAM, procesos vivos y un único `stop/1` al final con todos los pids devueltos por `start_link/2`.
