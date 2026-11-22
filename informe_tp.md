@@ -2,32 +2,25 @@
 
 Programación Concurrente y Paralela · Segundo cuatrimestre de 2026
 
-> **Variante experimental al 20/11/2026.** Se limita la metadata con
-> `cupo_metadatos/2`: `max(2, cantidad_de_peers) * Alfa`. Se preservan las
-> entradas de valores residentes y las marcas mas nuevas que entren en el
-> cupo. La heuristica se penso para alfas y cantidades de peers chicos;
-> para alfas grandes se debe reevaluar memoria y costo del recorte. No es
-> una recoleccion segura: olvidar una marca puede revivir un dato borrado.
-> La suite actual tiene 92/92 aprobados, incluido el caso borde que espera
-> la resurreccion conocida por API; no es una version
-> lista para reentrega. La [cronologia detallada](docs/metadata_cupo.md)
-> distingue la cota de espacio de las garantias que quedan incumplidas.
-> El PDF existente corresponde a la entrega original y no fue regenerado.
+> Informe fuente de la variante por tandas. El PDF disponible corresponde a la
+> entrega original. El [diseño de recolección](docs/metadata_tandas.md) amplía
+> la justificación y las cotas de este informe.
 
 ## 1. Estado de cada réplica
 
 Cada réplica es un proceso enlazado al invocante de `start_link/2`. Recibe los pids de sus pares y la capacidad α. El estado pasa por los argumentos de su ciclo de recepción.
 
 - `Valores` guarda hasta α asociaciones `Clave => {Version, {valor, Valor, Vence}}`. Cada clave ocupa a lo sumo una plaza.
-- `Metadatos` guarda la mayor versión aplicada de cada clave y su estado, `valor`, `borrado` o `desalojado`. Las marcas sobreviven a la salida del valor mientras entren en el cupo; solo durante esa retencion permiten rechazar mensajes obsoletos. El cupo no modifica el mapa de valores ni el ranking protegido.
+- `Metadatos` guarda la mayor versión aplicada y su estado, `valor`, `borrado` o `desalojado`. Después del cierre de cada tanda se conserva solo la metadata de las claves con alguna copia residente.
+- `Tanda` lleva el número, la fase, el cupo de cambios locales usado y los avisos recibidos de cada par.
 - `Recientes` registra claves y versiones de las últimas escrituras conocidas que definen la protección de capacidad. La cantidad de registros está acotada por el cupo protegido.
 - `Pendientes` registra cada lectura en curso, su cliente, la clave, los pares que todavía deben contestar y el mejor candidato transitorio. La entrada se elimina al responder. Solo `Valores` se usa como almacenamiento de la base de datos.
 
 ## 2. Versiones, conflictos y borrados
 
-Cada escritura o borrado recibe una versión de `erlang:unique_integer([monotonic])`. Dentro de la única VM BEAM, las versiones son únicas y crecientes. Una réplica compara la versión entrante con la mayor que conoce para esa clave. Mientras se conserva la version maxima de la clave, la comparacion es independiente del orden de entrega. Una marca de borrado conserva su version al liberar la plaza, pero el recorte puede eliminarla despues. Un `put` anterior se descarta mientras la marca exista; si fue eliminada puede revivir el dato. Una escritura posterior puede recrear la clave legitimamente.
+Cada escritura o borrado recibe una versión de `erlang:unique_integer([monotonic])`. Dentro de la única VM BEAM, las versiones son únicas y crecientes. Una réplica compara la versión entrante con la mayor que conoce para esa clave. El orden de versiones se conserva durante toda la tanda. Un borrado deja una marca al liberar la plaza. Un `put` anterior se descarta, y uno posterior puede recrear la clave.
 
-Un desalojo conserva la version como marca `desalojado` mientras entre en el cupo. Una copia de esa misma versión puede recuperarse por consulta o volver a ocupar una plaza. Esto permite distinguir la falta de una copia local del borrado de la clave.
+Un desalojo conserva la versión como marca `desalojado`. Se retiene al compactar si alguna réplica conserva el valor. Una copia de esa misma versión puede recuperarse por consulta o volver a ocupar una plaza. Esto permite distinguir la falta de una copia local del borrado de la clave.
 
 ## 3. Vencimiento
 
@@ -50,9 +43,13 @@ Al contestar un `get`, se evalúa el vencimiento del candidato ganador, incluso 
 | `{ofrecer, Clave, Entrada}` | Réplica que desaloja | Todos sus pares | Da al receptor la opción de conservar un valor vigente. |
 | `{consultar, Solicitante, RefConsulta, Clave}` | Réplica que atiende un `get` | Todos sus pares | Solicita la entrada o marca local. |
 | `{respuesta_consulta, RefConsulta, Par, Resultado}` | Par consultado | Réplica solicitante | Aporta un candidato y completa el turno de ese par para esa lectura. |
+| `{tanda, N, Emisor, actualizaciones, ok}` | Réplica | Sus pares | Cierra la admisión y marca el fin de actualizaciones del emisor. |
+| `{tanda, N, Emisor, ofertas, ok}` | Réplica | Sus pares | Marca el fin de ofertas, posterior al procesamiento de todas las actualizaciones de la tanda. |
+| `{tanda, N, Emisor, residentes, Claves}` | Réplica | Sus pares | Aporta sus claves residentes, luego de drenar ofertas y lecturas pendientes. |
+| `{tanda, N, Emisor, compactada, ok}` | Réplica | Sus pares | Confirma que el emisor terminó de compactar. |
 | `stop` | Invocante de `stop/1` | Réplica monitoreada | Termina su ciclo de recepción. |
 
-Cada pedido usa una referencia única. `put` y `delete` devuelven `ok` después de aplicar el cambio local, sin esperar confirmaciones de los pares. `stop/1` devuelve `ok` después de recibir los avisos de terminación de todos los pids.
+Cada pedido usa una referencia única. `put` y `delete` admitidos devuelven `ok` después de aplicar el cambio local, sin esperar confirmaciones de los pares. Cada réplica admite hasta α cambios por tanda. Los pedidos nuevos esperan si la tanda anterior está cerrando. `stop/1` devuelve `ok` después de recibir los avisos de terminación de todos los pids.
 
 ## 5. Capacidad y desalojo
 
@@ -70,15 +67,19 @@ Si la réplica tiene un valor o un borrado, usa esa información. Si desconoce l
 
 La réplica sigue atendiendo durante la espera y cada consulta entre pares se responde en un solo paso local. Bajo los supuestos de procesos vivos, entrega y ejecución eventual, no se forma una dependencia circular. El candidato en `Pendientes` existe durante ese pedido y solo interviene en su respuesta. Los demás pedidos consultan su propia información local y, si hace falta, inician su propia lectura.
 
-En la entrega original, la conservacion indefinida de la mayor version por clave sustentaba el argumento de convergencia observable. El cupo experimental rompe esa premisa: despues de que cesen las escrituras y se procesen todos los mensajes, puede quedar un valor resucitado por una escritura u oferta anterior al borrado. Esperar la propagacion no lo corrige. Por lo tanto no se afirma convergencia correcta ni preservacion general del borrado para esta variante. El TTL se sigue verificando al responder y el cupo de valores y el ranking protegido se mantienen, pero no alcanzan para suplir la version olvidada.
+Cada réplica cierra el envío de actualizaciones y, una vez procesados los avisos de todos los pares, cierra el envío de ofertas. Por FIFO, el receptor procesa los mensajes anteriores a cada aviso. Durante el cierre se completan las consultas ya iniciadas y se siguen contestando las consultas de pares. Las nuevas lecturas que necesitan consultar esperan a la siguiente tanda.
 
-Las pruebas incluyen versiones en órdenes opuestos, borrados atrasados, ofertas, consultas concurrentes, TTL durante una consulta y desalojo asimétrico entre dos réplicas. Verifican escenarios concretos. Los argumentos de la entrega original dependian de conservar las marcas. La prueba del caso borde usa operaciones reales de la API y un punto de pausa del debugger de OTP antes del envio pendiente. Pasa al observar la resurreccion conocida, sin fabricar mensajes ni versiones; no acredita seguridad. Reemplaza las pruebas de entregas sinteticas de ese caso. Las mediciones de tamano solo acreditan el cupo.
+Todos intercambian sus claves residentes después de drenar ofertas y lecturas. Luego compactan a la unión de esas claves y abren la próxima tanda al confirmar todas las compactaciones. Un borrado olvidado no puede ser revertido por mensajes de la tanda cerrada, porque ya se procesaron y no quedó copia residente. Una réplica que carece de una clave presente en otra conserva su metadata y puede recuperarla por consulta. Esto permite comparar las lecturas después de estabilizar la propagación, sujeto al TTL y a los desalojos ya efectuados.
+
+Con N réplicas, la unión tiene hasta N × α claves. Una tanda agrega hasta N × α escrituras o borrados y las ofertas trasladan claves de ese mismo conjunto. Así, el mapa `Metadatos` tiene hasta 2 × N × α entradas durante la tanda y hasta N × α al compactar. `Valores` y el ranking `Recientes` conservan sus cotas.
+
+Las pruebas por API cubren escrituras y ofertas atrasadas, lecturas con un candidato previo al borrado y reutilización de la clave. También miden la metadata y verifican que `Valores` y `Recientes` respeten sus límites.
 
 ## 7. Ejemplos de lectura y desalojo
 
 ### Lectura de un valor desalojado
 
-Dos réplicas tienen capacidad α = 4 y protegen las tres escrituras más recientes. P1 escribe, en orden, `k`, `temporal`, `a`, `b` y `c`. Solo `temporal` tiene TTL finito. P2 está demorada.
+Dos réplicas tienen capacidad α = 4 y protegen las tres escrituras más recientes. P2 escribe `k` y P1 lo recibe. Luego P2 se demora mientras P1 escribe, en orden, `temporal`, `a`, `b` y `c`. Solo `temporal` tiene TTL finito.
 
 Al guardar `c`, P1 protege `a`, `b` y `c`. Los candidatos son `k` y `temporal`, ambos vigentes en ese momento. P1 ofrece y desaloja `k` por ser el más antiguo. Cuando P2 procesa esa misma escritura, `temporal` ya venció. P2 desaloja `temporal` y conserva `k`.
 

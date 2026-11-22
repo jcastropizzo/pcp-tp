@@ -4,41 +4,26 @@
 
 **Entrega** el 11/11/2026 a las 23:59 mediante push al repositorio asignado por la cátedra, con ambos integrantes registrados. El coloquio figura para el 18/11, a acordar con cada grupo.
 
-## Experimento de metadata · 20/11/2026
+## Recolección de metadata por tandas
 
-Se aplica por replica el cupo `simple_kv_almacen:cupo_metadatos/2`:
-`max(2, cantidad_de_peers) * Alfa`. Los peers excluyen al nodo local;
-con 0, 1 o 2 peers se usa un cupo de `2 * Alfa`, y con mas peers se usa
-su cantidad real. El comentario identifica una heuristica de tamano para
-alfas y cantidades de peers chicos; para alfas grandes hay que reevaluar
-memoria y costo del recorte. El cupo es de entradas, no de bytes.
+Cada réplica admite hasta α escrituras o borrados por tanda. Al cerrar, las
+réplicas procesan las actualizaciones y ofertas pendientes, terminan las
+lecturas ya iniciadas y conservan metadata para las claves con alguna copia
+residente. El protocolo mantiene `Valores` en hasta α entradas y conserva la
+política de `Recientes`.
 
-Siempre se conserva la metadata de valores residentes y se completa el cupo
-con las marcas de mayor version. Esto limita el crecimiento, pero **no resuelve
-la seguridad del borrado ante escrituras u ofertas viejas**. No esta listo
-para reentrega. [Regla, cronologia y contraejemplo](docs/metadata_cupo.md).
+Con `N` réplicas, `Metadatos` tiene hasta `2 × N × α` entradas durante una
+tanda y hasta `N × α` al compactar. Las operaciones admitidas responden
+localmente. Al llenarse una tanda, las nuevas escrituras y borrados esperan
+a que termine el cierre anterior. [Protocolo, argumento y cotas](docs/metadata_tandas.md).
 
-Con tres replicas, Alfa = 4 y cinco tandas de doce claves, la metadata queda
-en 8 por replica en ambas mediciones. `Recientes` queda en 3; los valores
-quedan en 4 con desalojos y en 0 con borrados.
-
-**Verificacion de esta variante:** compilacion sin advertencias y
-**92/92 pruebas aprobadas**. El caso borde se reproduce con `start_link`,
-`put`, `delete`, `get` y `stop` reales. El debugger de OTP pausa P1 al
-entrar a `replicar/3`; no se construyen mensajes ni versiones en el test.
-Su resultado esperado es la resurreccion conocida: no acredita seguridad
-del borrado. Las pruebas anteriores de entregas sinteticas de este caso
-fueron reemplazadas por esta reproduccion por API; los 83 tests historicos
-permanecen sin cambiar y pasan con el nuevo piso del cupo.
-
-Para ese test se necesita el componente `debugger` de Erlang/OTP, sin interfaz
-grafica. `rebar.config` ya compila con `debug_info`, necesario para el punto de
-pausa. El test retira el punto de pausa y la interpretacion al terminar.
-
-La tabla siguiente y el PDF enlazado al principio describen la entrega
-original; no acreditan la correccion de esta variante. El informe fuente
-explicita la limitacion actual. Trabajo aislado en una rama y PR experimental;
-no implica reentrega ni integracion en main.
+El [experimento anterior](docs/metadata_cupo.md) documenta cómo el cupo fijo
+podía revivir un borrado. En esta rama, las regresiones por API exigen que
+una escritura u oferta atrasada no reviva el dato y que una escritura nueva
+pueda reutilizar la clave. Para controlar la planificación, algunas de estas
+pruebas usan el componente `debugger` de OTP con `debug_info`, ya configurado
+en Rebar. El PDF enlazado arriba corresponde a la entrega original. El
+informe fuente describe el protocolo de esta rama.
 
 ## Requisitos y estado
 
@@ -51,9 +36,9 @@ no implica reentrega ni integracion en main.
 | §4.7 · Capacidad y protección del 75 % | **Implementado y verificado bajo la interpretación documentada** | El mapa tiene como máximo α plazas. Se protege `ceil(3 × α / 4)` de las últimas escrituras conocidas por clave, incluidas las remotas. Un vencido protegido conserva su plaza hasta salir del grupo y un borrado libera la plaza. Entre los elegibles se toma primero un vencido y luego el más antiguo si todos siguen vigentes. [Capacidad](src/simple_kv_capacidad.erl) · [Frontera, TTL y borrado](test/simple_kv_capacidad_tests.erl) |
 | §4.7 · Ofertas y terminación | **Implementado y verificado** | Se ofrece cada víctima vigente. El receptor puede usar una plaza libre, la de la misma clave o la de un vencido elegible. Al procesar una oferta no se emiten otras. [Implementación](src/simple_kv_capacidad.erl) · [Tests](test/simple_kv_desalojo_tests.erl) |
 | §§4.3, 4.8 · Lecturas y convergencia observable | **Implementado y verificado en los casos de prueba** | Un `get` sin copia ni borrado local consulta a los pares y usa la mayor versión. Con un par demorado se probó que ambos responden el valor correcto aunque solo uno lo conserve. El informe justifica la convergencia tras la propagación. [Lecturas](src/simple_kv_replica.erl) · [Tests](test/simple_kv_consultas_tests.erl) |
-| §§5.1–5.2 · Correlación y ausencia de deadlock | **Implementado y verificado para el protocolo válido** | Referencias por pedido y consulta, una respuesta por par y descarte de mensajes inesperados. Las réplicas contestan consultas mientras otras están pendientes. [Tests](test/simple_kv_consultas_tests.erl) |
+| §§5.1–5.2 · Correlación y ausencia de deadlock | **Implementado y verificado para el protocolo válido** | Referencias por pedido y consulta, una respuesta por par y descarte de mensajes inesperados. Las réplicas contestan consultas mientras otras están pendientes, incluso al cerrar una tanda. [Tests](test/simple_kv_consultas_tests.erl) |
 | §6 · Restricciones y compilación | **Implementado y verificado** | Estado en argumentos del ciclo, sin dependencias de behaviours ni almacenamiento externo. El nombre de `src/simple_kv_ttl.erl` coincide con el del módulo. |
-| §8 · Tests propios e informe de hasta cinco páginas | **Implementado y verificado** | La suite incluye escenarios por API y pruebas controladas del protocolo. El PDF tiene cuatro páginas e incluye la tabla de mensajes, los argumentos de corrección y ejemplos de lectura y desalojo. |
+| §8 · Tests propios e informe de hasta cinco páginas | **Implementado y verificado** | La suite incluye escenarios por API y pruebas controladas del protocolo. El informe fuente incluye los avisos y el argumento de compactación. El PDF de la entrega original es histórico. |
 
 ## Alcance de las decisiones
 
@@ -68,6 +53,6 @@ rebar3 compile
 rebar3 eunit
 ```
 
-**Resultado historico de la entrega original:** 83/83 tests EUnit y compilacion sin advertencias. Para la variante actual, ver el estado experimental de arriba: 92/92, incluyendo la caracterizacion del defecto conocido.
+**Rama por tandas:** 89/89 tests EUnit y compilación sin advertencias. Los 83/83 tests de la entrega original corresponden a la versión histórica.
 
 La compilación directa se verifica con `erlc +warn_all -Werror -o <directorio-temporal> src/*.erl test/*.erl`. Se asume una sola BEAM, procesos vivos y un único `stop/1` al final con todos los pids devueltos por `start_link/2`.

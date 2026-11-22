@@ -2,12 +2,15 @@
 -include_lib("eunit/include/eunit.hrl").
 -import(simple_kv_test_utils, [iniciar/2, replica_con_par_falso/1, escribir/2,
                               lecturas/2, consultar_local/2, get_async/2,
-                              esperar_get/1, esperar_consulta/1, responder_consulta/3]).
+                              esperar_get/1, esperar_consulta/1, responder_consulta/3,
+                              cerrar_tanda_par_falso/2]).
 
 %% Un valor desalojado localmente se recupera desde otra replica.
 lee_valor_desalojado_desde_otra_replica_test() ->
     Rep = replica_con_par_falso(3),
-    escribir(Rep, [1, 2, 3, 4]),
+    escribir(Rep, [1, 2, 3]),
+    ok = cerrar_tanda_par_falso(Rep, [1]),
+    escribir(Rep, [4]),
     Entry1 = receive {ofrecer, 1, E} -> E after 1000 -> erlang:error(sin_oferta) end,
     ok = get_async(Rep, 1),
     {Rep, RefConsulta} = esperar_consulta(1),
@@ -28,7 +31,9 @@ clave_desconocida_test() ->
 %% mas alta: si el par tiene un borrado mas nuevo, el resultado es not_found.
 gana_la_version_mas_alta_test() ->
     Rep = replica_con_par_falso(3),
-    escribir(Rep, [1, 2, 3, 4]),
+    escribir(Rep, [1, 2, 3]),
+    ok = cerrar_tanda_par_falso(Rep, [1]),
+    escribir(Rep, [4]),
     ok = get_async(Rep, 1),
     {Rep, RefConsulta} = esperar_consulta(1),
     BorradoNuevo = {simple_kv_replicacion:nueva_version(), borrado},
@@ -222,9 +227,12 @@ valor_remoto_vence_antes_de_finalizar_get_test() ->
 %% Un vencimiento elegible durante la demora permite al par conservar una copia remota.
 replica_demorada_conserva_copia_para_get_test() ->
     {ok, [P1, P2] = Pids} = simple_kv:start_link(2, 4),
-    true = erlang:suspend_process(P2),
     try
-        escribir(P1, [k]),
+        %% P2 origina k para que las cuatro operaciones siguientes quepan
+        %% en el cupo local de P1 mientras P2 está suspendida.
+        escribir(P2, [k]),
+        ?assertEqual({ok, k}, simple_kv:get(P1, k)),
+        true = erlang:suspend_process(P2),
         ok = simple_kv:put(P1, temporal, temporal, 500),
         escribir(P1, [a, b, c]),
         {ok, {Version, desalojado}} = consultar_local(P1, k),

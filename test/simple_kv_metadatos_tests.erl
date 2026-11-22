@@ -1,82 +1,293 @@
 -module(simple_kv_metadatos_tests).
 -include_lib("eunit/include/eunit.hrl").
 
-%% Tres replicas, alfa = 4: cupo = 2 * 4 = 8 por replica.
-%% Se mide con propagacion estabilizada. El ultimo test documenta por API
-%% la resurreccion conocida; que pase no demuestra seguridad del borrado.
-metadata_se_estabiliza_con_desalojos_test() ->
+metadata_acotada_con_desalojos_test() ->
     medir(desalojo).
 
-metadata_se_estabiliza_con_borrados_test() ->
+metadata_acotada_con_borrados_test() ->
     medir(borrado).
 
+metadata_acotada_con_productores_concurrentes_test() ->
+    con_replicas(fun([P1 | _] = Pids) ->
+        Padre = self(),
+        Ref = make_ref(),
+        Clientes = [spawn_link(fun() ->
+            lists:foreach(fun(N) ->
+                Clave = {P, N},
+                ok = simple_kv:put(P, Clave, N),
+                case N rem 2 of
+                    0 -> ok = simple_kv:delete(P, Clave);
+                    1 -> ok
+                end
+            end, lists:seq(1, 24)),
+            Padre ! {Ref, self()}
+        end) || P <- Pids],
+        try
+            lists:foreach(fun(Cliente) ->
+                receive {Ref, Cliente} -> ok
+                after 1500 -> error({productor_bloqueado, Cliente})
+                end
+            end, Clientes),
+            %% La última escritura debe llegar a todos pese al tráfico y las
+            %% reaperturas concurrentes. Las trazas comprueban las tres cotas.
+            ok = simple_kv:put(P1, ultima, final),
+            esperar_estados(Pids, fun({V, _, _, _, _}) ->
+                case maps:find(ultima, V) of
+                    {ok, {_, {valor, final, _}}} -> true;
+                    _ -> false
+                end
+            end, observacion()),
+            ?assertEqual([{ok, final}, {ok, final}, {ok, final}], lecturas(Pids, ultima))
+        after
+            lists:foreach(fun(C) -> unlink(C), exit(C, kill) end, Clientes)
+        end
+    end).
+
 medir(Modo) ->
-    {module, simple_kv_replica} = code:ensure_loaded(simple_kv_replica),
-    erlang:trace_pattern({simple_kv_replica, loop, 6}, true, [local]),
-    {ok, [Origen | _] = Pids} = simple_kv:start_link(3, 4),
-    try
-        [erlang:trace(P, true, [call, send, 'receive', {tracer, self()}]) || P <- Pids],
-        {Muestras, _} = lists:mapfoldl(
-            fun(Tanda, Observacion) ->
-                Claves = [{Modo, Tanda, N} || N <- lists:seq(1, 12)],
-                lists:foreach(fun(K) ->
-                    ok = simple_kv:put(Origen, K, K),
-                    case Modo of
-                        borrado -> ok = simple_kv:delete(Origen, K);
-                        desalojo -> ok
+    con_replicas(fun([Origen | _] = Pids) ->
+        Alfa = 4,
+        lists:foldl(fun(Tanda, Observacion) ->
+            Claves = [{Modo, Tanda, N} || N <- lists:seq(1, 12)],
+            lists:foreach(fun(K) ->
+                ok = simple_kv:put(Origen, K, K),
+                case Modo of
+                    borrado -> ok = simple_kv:delete(Origen, K);
+                    desalojo -> ok
+                end
+            end, Claves),
+            Rondas = case Modo of desalojo -> 3; borrado -> 6 end,
+            {Estados, _} = Siguiente = esperar_tanda(Pids, Tanda * Rondas, Observacion),
+            Esperado = case Modo of desalojo -> Alfa; borrado -> 0 end,
+            lists:foreach(fun(P) ->
+                {Valores, Meta, _, _, _} = maps:get(P, Estados),
+                ?assertEqual(Esperado, map_size(Valores)),
+                ?assertEqual(Esperado, map_size(Meta))
+            end, Pids),
+            Siguiente
+        end, observacion(), lists:seq(1, 5))
+    end).
+
+%% La escritura original quedó pausada después del ok local y antes del envío.
+%% Las operaciones son de la API y las versiones las genera la implementación.
+escritura_demorada_no_revive_y_se_puede_reutilizar_test() ->
+    con_envio_pausable(replicar, fun([P1, P2, P3] = Pids) ->
+        ok = simple_kv:put(P1, k, rojo),
+        esperar_break(P1),
+        ok = int:no_break(simple_kv_replicacion),
+        ?assertEqual([], int:all_breaks(simple_kv_replicacion)),
+        ok = simple_kv:delete(P2, k),
+        borrar_relleno(P2, 3),
+        Cerrando = esperar_estados([P2, P3], fun({_, M, _, _, {_, Fase}}) ->
+            es_marca_borrado(k, M) andalso Fase =/= abierta
+        end, observacion()),
+        ?assertEqual(not_found, simple_kv:get(P3, k)),
+        %% La siguiente operación queda sin admitir mientras falta P1.
+        Padre = self(),
+        Ref = make_ref(),
+        Cliente = spawn_link(fun() ->
+            Padre ! {Ref, simple_kv:delete(P2, siguiente)}
+        end),
+        try
+            esperar(fun() ->
+                {messages, Mensajes} = process_info(P2, messages),
+                lists:any(fun
+                    ({delete, P, _, siguiente}) -> P =:= Cliente;
+                    (_) -> false
+                end, Mensajes)
+            end),
+            ?assert(is_process_alive(Cliente)),
+            ok = int:continue(P1),
+            esperar_cliente(Ref),
+            Abierta = esperar_tanda(Pids, 1, Cerrando),
+            comprobar_borrada(Pids, Abierta),
+            ok = simple_kv:put(P3, k, azul),
+            esperar_estados(Pids, fun({V, _, _, _, _}) ->
+                case maps:find(k, V) of
+                    {ok, {_, {valor, azul, _}}} -> true;
+                    _ -> false
+                end
+            end, Abierta),
+            ?assertEqual([{ok, azul}, {ok, azul}, {ok, azul}], lecturas(Pids, k))
+        after
+            unlink(Cliente),
+            exit(Cliente, kill)
+        end
+    end).
+
+%% Incluso una oferta disparada antes del borrado se procesa con su marca vigente.
+oferta_demorada_no_revive_borrado_test() ->
+    con_replicas(fun([P1, P2, P3] = Pids) ->
+        simple_kv_test_utils:escribir(P1, [k, a, b, c]),
+        Inicial = esperar_tanda(Pids, 1, observacion()),
+        con_punto_de_pausa(ofrecer, P1, fun() ->
+            Padre = self(),
+            Ref = make_ref(),
+            Cliente = spawn_link(fun() ->
+                Padre ! {Ref, simple_kv:put(P1, d, d)}
+            end),
+            try
+                esperar_break(P1),
+                ok = int:no_break(simple_kv_replicacion),
+                ?assertEqual([], int:all_breaks(simple_kv_replicacion)),
+                ok = simple_kv:delete(P2, k),
+                borrar_relleno(P2, 3),
+                Cerrando = esperar_estados([P2, P3], fun({_, M, _, _, {_, Fase}}) ->
+                    es_marca_borrado(k, M) andalso Fase =/= abierta
+                end, Inicial),
+                ?assertEqual(not_found, simple_kv:get(P3, k)),
+                ok = int:continue(P1),
+                esperar_cliente(Ref),
+                Abierta = esperar_tanda(Pids, 2, vigilar_ausencia(k, [P2, P3], Cerrando)),
+                comprobar_borrada(Pids, Abierta),
+                ?assertEqual([{ok, d}, {ok, d}, {ok, d}], lecturas(Pids, d))
+            after
+                unlink(Cliente),
+                exit(Cliente, kill)
+            end
+        end)
+    end).
+
+%% Una lectura ya abierta guarda un candidato rojo antes del borrado y
+%% termina durante el cierre, cuando llega la respuesta del último par.
+lectura_pendiente_no_restaura_candidato_borrado_test() ->
+    con_replicas(fun([P1, P2, P3] = Pids) ->
+        con_punto_de_pausa(replicar, P2, fun() ->
+            true = erlang:suspend_process(P3),
+            Padre = self(),
+            Ref = make_ref(),
+            try
+                ok = simple_kv:put(P2, k, rojo),
+                esperar_break(P2),
+                ok = int:no_break(simple_kv_replicacion),
+                ?assertEqual([], int:all_breaks(simple_kv_replicacion)),
+                spawn_link(fun() -> Padre ! {Ref, simple_kv:get(P1, k)} end),
+                Consultando = esperar_estados([P1], fun({_, _, _, Pendientes, _}) ->
+                    map_size(Pendientes) =:= 1
+                end, observacion()),
+                ok = int:continue(P2),
+                ConCandidato = esperar_estados([P1], fun({_, _, _, Pendientes, _}) ->
+                    case maps:values(Pendientes) of
+                        [{_, _, k, [P3], {ok, {_, {valor, rojo, _}}}}] -> true;
+                        _ -> false
                     end
-                end, Claves),
-                {Estados, _} = Estable = estabilizar(Pids, Observacion),
-                Medidas = [medida(maps:get(P, Estados)) || P <- Pids],
-                Valores = case Modo of desalojo -> 4; borrado -> 0 end,
-                %% Cada fila contiene {valores, metadata, recientes} por replica.
-                lists:foreach(fun({V, M, R}) ->
-                    ?assertEqual(Valores, V),
-                    ?assert(M =< 8),
-                    ?assert(R =< 3)
-                end, Medidas),
-                {Medidas, Estable}
-            end,
-            {#{}, 0}, lists:seq(1, 5)),
-        ?debugFmt("~p: tandas de 12; {valores, metadata, recientes}: ~p", [Modo, Muestras]),
-        [_Primera, _Segunda, Base | Posteriores] = Muestras,
-        lists:foreach(fun(Muestra) ->
-            lists:foreach(fun({{_V0, MetadataBase, _R0}, {_V, MetadataActual, _R}}) ->
-                ?assert(MetadataActual =< MetadataBase)
-            end, lists:zip(Base, Muestra))
-        end, Posteriores)
-    after
-        [erlang:trace(P, false, [all]) || P <- Pids],
-        erlang:trace_pattern({simple_kv_replica, loop, 6}, false, [local]),
-        simple_kv:stop(Pids),
-        recoger_trazas({#{}, 0})
+                end, Consultando),
+                ok = simple_kv:delete(P2, k),
+                borrar_relleno(P2, 2),
+                Cerrando = esperar_estados([P1], fun({_, M, _, Pendientes, Estado}) ->
+                    es_marca_borrado(k, M) andalso map_size(Pendientes) =:= 1
+                        andalso Estado =:= {0, cerrando}
+                end, ConCandidato),
+                true = erlang:resume_process(P3),
+                receive
+                    {Ref, Resultado} -> ?assertEqual(not_found, Resultado)
+                after 1000 -> error(lectura_no_termino)
+                end,
+                comprobar_borrada(Pids, esperar_tanda(Pids, 1, Cerrando))
+            after
+                try erlang:resume_process(P3) catch error:badarg -> ok end
+            end
+        end)
+    end).
+
+es_marca_borrado(Clave, Meta) ->
+    case maps:find(Clave, Meta) of {ok, {_, borrado}} -> true; _ -> false end.
+
+comprobar_borrada(Pids, {Estados, _}) ->
+    lists:foreach(fun(P) ->
+        {V, M, _, _, _} = maps:get(P, Estados),
+        ?assertNot(maps:is_key(k, V)),
+        ?assertNot(maps:is_key(k, M))
+    end, Pids),
+    ?assertEqual([not_found, not_found, not_found], lecturas(Pids, k)).
+
+lecturas(Pids, Clave) -> [simple_kv:get(P, Clave) || P <- Pids].
+
+borrar_relleno(Pid, Cantidad) ->
+    lists:foreach(fun(N) ->
+        ok = simple_kv:delete(Pid, {relleno, N})
+    end, lists:seq(1, Cantidad)).
+
+esperar_cliente(Ref) ->
+    receive {Ref, ok} -> ok
+    after 1000 -> error(cliente_no_termino)
     end.
 
-medida({Valores, Metadatos, Recientes, Pendientes}) ->
-    ?assertEqual(0, map_size(Pendientes)),
-    {map_size(Valores), map_size(Metadatos), map_size(Recientes)}.
+con_envio_pausable(Funcion, Prueba) ->
+    con_replicas(fun([P1 | _] = Pids) ->
+        con_punto_de_pausa(Funcion, P1, fun() -> Prueba(Pids) end)
+    end).
 
-estabilizar(Pids, Observacion) ->
-    estabilizar(Pids, Observacion, erlang:monotonic_time(millisecond) + 2000).
+con_punto_de_pausa(Funcion, Pid, Prueba) ->
+    Modulo = simple_kv_replicacion,
+    ?assertNot(lists:member(Modulo, int:interpreted())),
+    {module, Modulo} = int:i(Modulo),
+    try
+        ok = int:break_in(Modulo, Funcion, 3),
+        Prueba()
+    after
+        int:no_break(Modulo),
+        int:continue(Pid),
+        int:n(Modulo)
+    end.
 
-estabilizar(Pids, Observacion, Plazo) ->
-    Antes = sincronizar_trazas(Observacion),
-    Reposo = lists:all(fun(P) ->
-        process_info(P, [status, message_queue_len]) =:=
-            [{status, waiting}, {message_queue_len, 0}]
-    end, Pids),
-    {Estados, _} = Despues = sincronizar_trazas(Antes),
-    %% Los contadores incluyen recepciones y envios: no basta con que el
-    %% estado coincida si una oferta recorrio los buzones durante el muestreo.
-    case Reposo andalso Antes =:= Despues andalso map_size(Estados) =:= length(Pids) of
-        true -> Despues;
-        false ->
-            case erlang:monotonic_time(millisecond) >= Plazo of
-                true -> error({propagacion_no_estabilizada, Despues});
-                false ->
-                    timer:sleep(1),
-                    estabilizar(Pids, Despues, Plazo)
+esperar_break(Pid) ->
+    esperar(fun() ->
+        lists:any(fun
+            ({P, _, break, {simple_kv_replicacion, _}}) -> P =:= Pid;
+            (_) -> false
+        end, int:snapshot())
+    end).
+
+con_replicas(Prueba) ->
+    {module, simple_kv_replica} = code:ensure_loaded(simple_kv_replica),
+    erlang:trace_pattern({simple_kv_replica, loop, 7}, true, [local]),
+    {ok, Pids} = simple_kv:start_link(3, 4),
+    try
+        lists:foreach(fun(P) ->
+            erlang:trace(P, true, [call, {tracer, self()}])
+        end, Pids),
+        Prueba(Pids)
+    after
+        lists:foreach(fun(P) -> erlang:trace(P, false, [call]) end, Pids),
+        erlang:trace_pattern({simple_kv_replica, loop, 7}, false, [local]),
+        simple_kv:stop(Pids),
+        recolectar_trazas(observacion())
+    end.
+
+observacion() -> {#{}, #{}}.
+
+vigilar_ausencia(Clave, Pids, {Estados, Vigiladas}) ->
+    {Estados, lists:foldl(fun(P, Acc) -> Acc#{P => Clave} end, Vigiladas, Pids)}.
+
+esperar_tanda(Pids, Numero, Observacion) ->
+    esperar_estados(Pids, fun({_, _, _, Pendientes, Estado}) ->
+        Estado =:= {Numero, abierta} andalso map_size(Pendientes) =:= 0
+    end, Observacion).
+
+esperar_estados(Pids, Predicado, Observacion) ->
+    esperar(fun(Anterior) ->
+        {Estados, _} = Nueva = sincronizar_trazas(Anterior),
+        Listos = lists:all(fun(P) ->
+            case maps:find(P, Estados) of
+                {ok, Estado} -> Predicado(Estado);
+                error -> false
             end
+        end, Pids),
+        case Listos of true -> {ok, Nueva}; false -> {esperar, Nueva} end
+    end, Observacion, erlang:monotonic_time(millisecond) + 1500).
+
+esperar(Predicado) ->
+    esperar(fun(ok) ->
+        case Predicado() of true -> {ok, ok}; false -> {esperar, ok} end
+    end, ok, erlang:monotonic_time(millisecond) + 1500).
+
+esperar(Funcion, Estado, Plazo) ->
+    case Funcion(Estado) of
+        {ok, Resultado} -> Resultado;
+        {esperar, Siguiente} ->
+            ?assert(erlang:monotonic_time(millisecond) < Plazo),
+            timer:sleep(1),
+            esperar(Funcion, Siguiente, Plazo)
     end.
 
 sincronizar_trazas(Observacion) ->
@@ -84,107 +295,25 @@ sincronizar_trazas(Observacion) ->
     receive {trace_delivered, all, Ref} -> ok
     after 1000 -> error(trazas_no_entregadas)
     end,
-    recoger_trazas(Observacion).
+    recolectar_trazas(Observacion).
 
-recoger_trazas({Estados, N}) ->
+recolectar_trazas({Estados, Vigiladas} = Observacion) ->
     receive
         {trace, P, call, {simple_kv_replica, loop,
-                         [_Pares, _Alfa, Valores, Metadatos, Recientes, Pendientes]}} ->
-            recoger_trazas({maps:put(P, {Valores, Metadatos, Recientes, Pendientes}, Estados), N + 1});
-        {trace, _P, send, _Mensaje, _Destino} ->
-            recoger_trazas({Estados, N + 1});
-        {trace, _P, 'receive', _Mensaje} ->
-            recoger_trazas({Estados, N + 1})
-    after 0 -> {Estados, N}
-    end.
-
-replica_unica_conserva_valores_con_cupo_dos_alfa_test() ->
-    {ok, [P]} = simple_kv:start_link(1, 4),
-    try
-        simple_kv_test_utils:escribir(P, [a, b, c, d, e, f]),
-        lists:foreach(fun(K) -> ?assertEqual({ok, K}, simple_kv:get(P, K)) end,
-                      [c, d, e, f])
-    after simple_kv:stop([P]) end.
-
-%% Caso borde conocido por API real: el debugger solo demora la ejecucion de
-%% P1 al entrar a replicar/3. No se construyen mensajes ni versiones en el test.
-%% Esta expectativa documenta el defecto; no valida la seguridad del borrado.
-caso_borde_documentado_put_viejo_restaura_borrada_por_api_test() ->
-    ?assertNot(lists:member(simple_kv_replicacion, int:interpreted())),
-    {module, simple_kv_replicacion} = int:i(simple_kv_replicacion),
-    ok = int:break_in(simple_kv_replicacion, replicar, 3),
-    {module, simple_kv_replica} = code:ensure_loaded(simple_kv_replica),
-    erlang:trace_pattern({simple_kv_replica, loop, 6}, true, [local]),
-    {ok, [P1, P2, P3] = Pids} = simple_kv:start_link(3, 4),
-    try
-        [erlang:trace(P, true, [call, send, 'receive', {tracer, self()}]) || P <- [P2, P3]],
-        %% El ok del put es local: P1 puede pausarse antes de propagarlo.
-        ok = simple_kv:put(P1, k, rojo),
-        esperar_break(P1, erlang:monotonic_time(millisecond) + 1000),
-        ok = int:no_break(simple_kv_replicacion),
-        ?assertEqual([], int:all_breaks(simple_kv_replicacion)),
-        ok = simple_kv:delete(P2, k),
-        %% La marca llega a P3 antes de que se hagan los borrados de relleno.
-        Borrada = esperar_estados([P2, P3], fun({_V, M, _R, _P}) ->
-            case maps:find(k, M) of {ok, {_, borrado}} -> true; _ -> false end
-        end, {#{}, 0}),
-        ?assertEqual(not_found, simple_kv:get(P3, k)),
-        Cupo = simple_kv_almacen:cupo_metadatos(length(Pids) - 1, 4),
-        lists:foreach(fun(N) ->
-            ok = simple_kv:delete(P2, {relleno, N})
-        end, lists:seq(1, Cupo)),
-        Olvidada = esperar_estados([P2, P3], fun({V, M, _R, _P}) ->
-            not maps:is_key(k, V) andalso not maps:is_key(k, M)
-                andalso maps:is_key({relleno, Cupo}, M)
-        end, Borrada),
-        %% P1 completa el envio real pendiente y luego procesa los borrados
-        %% que acumulo en su buzon. No hay otro put de k en toda la secuencia.
-        erlang:trace(P1, true, [call, send, 'receive', {tracer, self()}]),
-        ok = int:continue(P1),
-        Restaurada = esperar_estados([P3], fun({V, _M, _R, _P}) ->
-            maps:is_key(k, V)
-        end, Olvidada),
-        esperar_estados([P1], fun({V, M, _R, _P}) ->
-            not maps:is_key(k, V) andalso maps:is_key({relleno, Cupo}, M)
-        end, Restaurada),
-        ?assertEqual({ok, rojo}, simple_kv:get(P3, k))
-    after
-        int:no_break(simple_kv_replicacion),
-        int:continue(P1),
-        [erlang:trace(P, false, [all]) || P <- Pids],
-        erlang:trace_pattern({simple_kv_replica, loop, 6}, false, [local]),
-        simple_kv:stop(Pids),
-        int:n(simple_kv_replicacion),
-        recoger_trazas({#{}, 0})
-    end.
-
-esperar_break(Pid, Plazo) ->
-    case lists:any(fun
-        ({P, _, break, {simple_kv_replicacion, _Linea}}) -> P =:= Pid;
-        (_) -> false
-    end, int:snapshot()) of
-        true -> ok;
-        false ->
-            ?assert(erlang:monotonic_time(millisecond) < Plazo),
-            timer:sleep(1),
-            esperar_break(Pid, Plazo)
-    end.
-
-esperar_estados(Pids, Predicado, Observacion) ->
-    esperar_estados(Pids, Predicado, Observacion,
-                    erlang:monotonic_time(millisecond) + 1000).
-
-esperar_estados(Pids, Predicado, Observacion, Plazo) ->
-    {Estados, _} = Nueva = sincronizar_trazas(Observacion),
-    case lists:all(fun(P) ->
-        case maps:find(P, Estados) of
-            {ok, Estado} -> Predicado(Estado);
-            error -> false
-        end
-    end, Pids) of
-        true -> Nueva;
-        false ->
-            ?assert(erlang:monotonic_time(millisecond) < Plazo),
-            timer:sleep(1),
-            esperar_estados(Pids, Predicado, Nueva, Plazo)
+                         [Pares, Alfa, V, M, R, Pendientes, Tanda]}} ->
+            N = length(Pares) + 1,
+            Estado = simple_kv_tandas:estado(Tanda),
+            ?assert(map_size(V) =< Alfa),
+            ?assert(map_size(M) =< 2 * N * Alfa),
+            ?assert(map_size(R) =< (3 * Alfa + 3) div 4),
+            case Estado of
+                {_, compactada} -> ?assert(map_size(M) =< N * Alfa);
+                _ -> ok
+            end,
+            case maps:find(P, Vigiladas) of
+                {ok, Clave} -> ?assertNot(maps:is_key(Clave, V));
+                error -> ok
+            end,
+            recolectar_trazas({Estados#{P => {V, M, R, Pendientes, Estado}}, Vigiladas})
+    after 0 -> Observacion
     end.
