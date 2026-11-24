@@ -60,18 +60,18 @@ version_no_obsoleta_compara_versiones_test() ->
     ).
 
 cupo_se_calcula_por_peers_y_alfa_test() ->
-    ?assertEqual(8, simple_kv_almacen:cupo_metadatos(2, 4)),
+    ?assertEqual(12, simple_kv_almacen:cupo_metadatos(2, 4)),
     ?assertEqual(8, simple_kv_almacen:cupo_metadatos(1, 4)),
-    ?assertEqual(1200, simple_kv_almacen:cupo_metadatos(3, 400)).
+    ?assertEqual(1600, simple_kv_almacen:cupo_metadatos(3, 400)).
 
 cupo_de_metadatos_usa_hasta_diez_peers_test() ->
-    ?assertEqual(36, simple_kv_almacen:cupo_metadatos(9, 4)),
-    ?assertEqual(40, simple_kv_almacen:cupo_metadatos(10, 4)),
-    ?assertEqual(40, simple_kv_almacen:cupo_metadatos(11, 4)),
-    ?assertEqual(4000, simple_kv_almacen:cupo_metadatos(100, 400)).
+    ?assertEqual(40, simple_kv_almacen:cupo_metadatos(9, 4)),
+    ?assertEqual(44, simple_kv_almacen:cupo_metadatos(10, 4)),
+    ?assertEqual(44, simple_kv_almacen:cupo_metadatos(11, 4)),
+    ?assertEqual(4400, simple_kv_almacen:cupo_metadatos(100, 400)).
 
-cupo_sin_peers_usa_minimo_dos_test() ->
-    ?assertEqual(8, simple_kv_almacen:cupo_metadatos(0, 4)).
+cupo_sin_peers_cuenta_la_replica_local_test() ->
+    ?assertEqual(4, simple_kv_almacen:cupo_metadatos(0, 4)).
 
 limite_preserva_residente_antiguo_test() ->
     Valores = #{k => {1, {valor, v, infinity}}},

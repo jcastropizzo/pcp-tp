@@ -4,12 +4,11 @@
 
 Por réplica, `Pares` contiene las otras réplicas, sin incluir al proceso local.
 La función `simple_kv_almacen:cupo_metadatos/2` recibe la cantidad de peers y α.
-El cupo es `max(2, min(10, length(Pares))) * Alfa`. Con tres réplicas y α = 4, cada
-réplica tiene dos peers y el cupo es **8 entradas totales de metadata**.
-Con 0, 1 o 2 peers se usa `2 * Alfa`. Entre 3 y 9 se usa su cantidad real;
-con 10 o más se usa `10 * Alfa`. El techo se aplica solo al presupuesto de
-metadata. Los mensajes se siguen enviando a todos los pares. Las plazas de
-valores del sistema siguen limitadas por `Count * Alfa`.
+El cupo es `(min(10, length(Pares)) + 1) * Alfa`. Se suma la réplica local
+y se cuentan hasta diez pares. Así, con tres réplicas y α = 4, el cupo es
+**12 entradas de metadata por réplica**. Hasta once réplicas el cupo coincide
+con `Count * Alfa`. Con más queda en `11 * Alfa`. El techo solo afecta el
+presupuesto de metadata. Los mensajes se siguen enviando a todos los pares.
 
 Antes de volver al ciclo de recepción se conserva toda la metadata de claves
 con valor residente. Las plazas restantes se completan con las marcas de mayor
@@ -36,13 +35,13 @@ pueden producir resultados incorrectos aun después de estabilizar la propagaci�
 
 ### Preparación
 
-- Tres réplicas reales: **P1, P2 y P3**. Capacidad α = 4 y cupo de metadata = 8
+- Tres réplicas reales: **P1, P2 y P3**. Capacidad α = 4 y cupo de metadata = 12
   en cada una. Pares de P1: `[P2,P3]`; de P2: `[P1,P3]`; de P3: `[P1,P2]`.
 - Estado inicialmente vacío; procesos vivos, una única BEAM, sin fallas.
 - Clave `k`, valor `rojo`, TTL `infinity`.
-- Versiones simbólicas `V1 < V2 < V3 < ... < V10`, generadas en ese orden por
+- Versiones simbólicas `V1 < V2 < V3 < ... < V14`, generadas en ese orden por
   el mecanismo existente. No son tiempos de reloj.
-- Ocho claves de relleno distintas `d1` a `d8`, diferentes de `k`. Se borran
+- Doce claves de relleno distintas `d1` a `d12`, diferentes de `k`. Se borran
   aunque no existan: la API lo admite y cada borrado genera una marca nueva.
 
 ### Cronología permitida
@@ -54,15 +53,15 @@ Los instantes son pasos lógicos; no requieren un tiempo concreto en milisegundo
 | t0 | Cliente → P1 | `put(P1, k, rojo)` | P1 genera V1 y guarda el valor. |
 | t1 | P1 | Responde `ok` al cliente. El scheduler lo desplanifica **antes de ejecutar** `replicar/3`. | P1 tiene `k`; aún no envió su escritura a P2 ni P3. El `ok` no confirma propagación. |
 | t2 | Cliente → P2 | `delete(P2, k)`. P2 genera V2 y envía a P1 y P3 `{replicar, k, {V2, borrado}}`. | P2 guarda la marca, aunque todavía no vio V1. P1 permanece sin ejecutar. |
-| t3 | Cliente → P2 | Ocho llamadas `delete(P2, di)`, en orden. Para cada i, P2 genera V(i+2) y envía a P1 y P3 `{replicar, di, {V(i+2), borrado}}`. | En P2, al entrar d8 hay nueve marcas: se elimina `k`, que es la de menor versión. |
-| t4 | P3 | Procesa el borrado de `k` y luego los ocho borrados de relleno de P2. | P3 también pierde la marca de `k`. No tiene valores. Su metadata contiene d1…d8. |
+| t3 | Cliente → P2 | Doce llamadas `delete(P2, di)`, en orden. Para cada i, P2 genera V(i+2) y envía a P1 y P3 `{replicar, di, {V(i+2), borrado}}`. | En P2, al entrar d12 hay trece marcas: se elimina `k`, que es la de menor versión. |
+| t4 | P3 | Procesa el borrado de `k` y luego los doce borrados de relleno de P2. | P3 también pierde la marca de `k`. No tiene valores. Su metadata contiene d1…d12. |
 | t5 | P1 | Vuelve a ejecutar y completa el envío pendiente: a P2 y P3 les manda `{replicar, k, {V1, {valor, rojo, infinity}}}`. | P2 y P3 pueden dejar ese mensaje en el buzón sin procesarlo todavía. |
-| t6 | P1 | Procesa los nueve mensajes de P2, en el orden enviado: primero borra `k` con V2; luego aplica d1…d8. | Ahora **las tres réplicas procesaron el borrado de k** y las tres olvidaron su marca. P1 ya no tiene el valor. La escritura V1 espera en P2/P3. |
+| t6 | P1 | Procesa los trece mensajes de P2, en el orden enviado: primero borra `k` con V2; luego aplica d1…d12. | Ahora **las tres réplicas procesaron el borrado de k** y las tres olvidaron su marca. P1 ya no tiene el valor. La escritura V1 espera en P2/P3. |
 | t7 | P3 | Procesa la escritura V1 de P1. | No encuentra metadata para `k`. `version_no_obsoleta/3` devuelve `true`; hay plaza libre y guarda `rojo`. |
 | t8 | P2 | Procesa también V1, que había quedado pendiente. | Acepta el mismo valor por el mismo motivo. Se procesa el resto del tráfico. |
 | t9 | Cliente → P3 | `get(P3, k)` | **Resultado requerido: `not_found`. Resultado actual: `{ok, rojo}`.** No hubo una escritura nueva de `k`. |
 
-En t7, la metadata de `k` tiene una versión menor que las ocho marcas de
+En t7, la metadata de `k` tiene una versión menor que las doce marcas de
 relleno, pero se conserva porque `k` volvió a ser un valor residente. Se elimina
 una marca de relleno para mantener el cupo. El recorte no corrige la resurrección.
 
@@ -73,7 +72,7 @@ una marca de relleno para mantener el cupo. El recorte no corrige la resurrecci�
    un bloqueo al programa. Una ejecución posible alcanza para el contraejemplo.
 2. P2 y P3 ejecutan mientras P1 está pausado. P2 puede completar operaciones
    porque `put` y `delete` no esperan a sus peers.
-3. Cada receptor procesa los mensajes de P2 en FIFO: borrado de `k`, d1, …, d8.
+3. Cada receptor procesa los mensajes de P2 en FIFO: borrado de `k`, d1, …, d12.
    **No se invierte ningún par de mensajes del mismo emisor al mismo destino.**
 4. Se pausa la ejecución de P2 y P3 alrededor de t5 para que procesen V1 después
    de t6. Un mensaje puede estar en el buzón sin haber sido aplicado.
@@ -116,7 +115,7 @@ Mientras P1 esta pausado:
 1. Ejecuta `delete(P2, k)` y verifica por observacion que P2/P3 aplicaron su
    marca; `get(P3, k)` da `not_found`.
 2. Calcula el cupo con `cupo_metadatos/2` y hace esa cantidad de llamadas
-   `delete(P2, {relleno, N})` a claves distintas. En este escenario son ocho.
+   `delete(P2, {relleno, N})` a claves distintas. En este escenario son doce.
 3. Verifica que P2 y P3 procesaron el ultimo borrado de relleno y olvidaron
    `k`, sin guardar su valor.
 
@@ -152,16 +151,17 @@ sigue siendo experimental y no esta listo para reentrega.
 
 Compilacion con `rebar3 compile` y compilacion directa con
 `erlc +warn_all -Werror` sin advertencias. Suite completa: **93/93 aprobados**,
-sobre una copia temporal de los mismos fuentes. Incluye los 83 tests historicos
-sin modificar, cinco tests del calculo/recorte y cuatro tests de metadata.
+sobre una copia temporal de los mismos fuentes. Incluye los 83 tests históricos,
+seis tests de cálculo y recorte, y cuatro tests de metadata.
 
 Con tres replicas y alfa = 4, las dos mediciones por cinco tandas de doce
-claves pasan: metadata = 8 por replica en todas las tandas, `Recientes` = 3;
+claves pasan: metadata = 12 por replica en todas las tandas, `Recientes` = 3;
 valores = 4 con desalojo y 0 con borrado. La prueba por API del caso borde pasa
 al observar `{ok, rojo}` en lugar del resultado correcto segun la consigna,
 `not_found`. Que la suite pase no acredita la seguridad del borrado.
 
-El piso de dos peers conserva las marcas esperadas por seis pruebas
-historicas que fallaban con el piso anterior de uno; no se cambiaron sus
-expectativas. El componente `debugger` de OTP y la compilacion con `debug_info`
-(ya configurada en `rebar.config`) son necesarios para la prueba por API.
+Con una réplica sola, el cupo de metadata es α. Si el mapa de valores está
+lleno, sus residentes desplazan las marcas. Tres tests históricos de capacidad
+comprueban ese comportamiento y siguen verificando qué valores se conservan.
+El componente `debugger` de OTP y `debug_info` (ya configurado en
+`rebar.config`) son necesarios para la prueba por API.

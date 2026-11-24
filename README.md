@@ -7,10 +7,10 @@
 ## Cupo de metadata
 
 Cada réplica calcula su cupo con `simple_kv_almacen:cupo_metadatos/2`.
-La fórmula es `max(2, min(10, cantidad_de_peers)) * Alfa`. Se cuentan los
-otros nodos, con piso de dos y techo de diez para el cálculo. Los mensajes
-siguen enviándose a todos los pares. El mapa de metadata queda limitado a
-**10 × Alfa** entradas por réplica aun si se agregan más nodos.
+La fórmula es `(min(10, cantidad_de_peers) + 1) * Alfa`. Se cuentan hasta
+diez pares más la réplica local. Para hasta once réplicas, el cupo es
+`N * Alfa` por réplica. A partir de ahí queda en **11 × Alfa**. Los mensajes
+siguen enviándose a todos los pares.
 
 Se preserva la metadata de los valores residentes y se completa el cupo con
 las marcas de mayor versión. El informe conserva las secciones de `main` y
@@ -19,7 +19,7 @@ demorada puede revivir un dato si ya se descartó su marca de borrado.**
 [Regla, cronología y contraejemplo](docs/metadata_cupo.md).
 
 Con tres réplicas, Alfa = 4 y cinco tandas de doce claves, la metadata se
-mantiene en 8 por réplica. Borde verificado con 9, 10 y 11 peers, y también con
+mantiene en 12 por réplica. Borde verificado con 9, 10 y 11 peers, y también con
 100 peers y Alfa = 400. El test del contraejemplo pasa al observar la
 resurrección mediante la API real. Requiere el componente `debugger` de OTP
 sin interfaz gráfica y la opción `debug_info` ya configurada en Rebar.

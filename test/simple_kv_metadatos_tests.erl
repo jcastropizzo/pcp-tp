@@ -1,7 +1,7 @@
 -module(simple_kv_metadatos_tests).
 -include_lib("eunit/include/eunit.hrl").
 
-%% Tres replicas, alfa = 4: cupo = 2 * 4 = 8 por replica.
+%% Tres replicas, alfa = 4: cupo = 3 * 4 = 12 por replica.
 %% Estas mediciones comprueban solo la cantidad de entradas después de
 %% estabilizar la propagación. La seguridad del borrado queda fuera de ellas.
 metadata_se_estabiliza_con_desalojos_test() ->
@@ -34,7 +34,7 @@ medir(Modo) ->
                 %% Cada fila contiene {valores, metadata, recientes} por replica.
                 lists:foreach(fun({V, M, R}) ->
                     ?assertEqual(Valores, V),
-                    ?assert(M =< 8),
+                    ?assertEqual(12, M),
                     ?assert(R =< 3)
                 end, Medidas),
                 {Medidas, Estable}
@@ -100,12 +100,15 @@ recoger_trazas({Estados, N}) ->
     after 0 -> {Estados, N}
     end.
 
-replica_unica_conserva_valores_con_cupo_dos_alfa_test() ->
+replica_unica_conserva_valores_con_cupo_alfa_test() ->
     {ok, [P]} = simple_kv:start_link(1, 4),
     try
         simple_kv_test_utils:escribir(P, [a, b, c, d, e, f]),
         lists:foreach(fun(K) -> ?assertEqual({ok, K}, simple_kv:get(P, K)) end,
-                      [c, d, e, f])
+                      [c, d, e, f]),
+        %% Los cuatro residentes llenan el cupo y desplazan las marcas.
+        ?assertEqual(error, simple_kv_test_utils:consultar_local(P, a)),
+        ?assertEqual(error, simple_kv_test_utils:consultar_local(P, b))
     after simple_kv:stop([P]) end.
 
 %% LIMITACIÓN CONOCIDA DEL CUPO. La prueba caracteriza un defecto y pasa
