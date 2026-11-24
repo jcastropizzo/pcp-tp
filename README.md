@@ -4,41 +4,26 @@
 
 **Entrega** el 11/11/2026 a las 23:59 mediante push al repositorio asignado por la cátedra, con ambos integrantes registrados. El coloquio figura para el 18/11, a acordar con cada grupo.
 
-## Experimento de metadata · 20/11/2026
+## Cupo de metadata
 
-Se aplica por replica el cupo `simple_kv_almacen:cupo_metadatos/2`:
-`max(2, cantidad_de_peers) * Alfa`. Los peers excluyen al nodo local;
-con 0, 1 o 2 peers se usa un cupo de `2 * Alfa`, y con mas peers se usa
-su cantidad real. El comentario identifica una heuristica de tamano para
-alfas y cantidades de peers chicos; para alfas grandes hay que reevaluar
-memoria y costo del recorte. El cupo es de entradas, no de bytes.
+Cada réplica calcula su cupo con `simple_kv_almacen:cupo_metadatos/2`.
+La fórmula es `max(2, min(10, cantidad_de_peers)) * Alfa`. Se cuentan los
+otros nodos, con piso de dos y techo de diez para el cálculo. Los mensajes
+siguen enviándose a todos los pares. El mapa de metadata queda limitado a
+**10 × Alfa** entradas por réplica aun si se agregan más nodos.
 
-Siempre se conserva la metadata de valores residentes y se completa el cupo
-con las marcas de mayor version. Esto limita el crecimiento, pero **no resuelve
-la seguridad del borrado ante escrituras u ofertas viejas**. No esta listo
-para reentrega. [Regla, cronologia y contraejemplo](docs/metadata_cupo.md).
+Se preserva la metadata de los valores residentes y se completa el cupo con
+las marcas de mayor versión. El informe conserva las secciones de `main` y
+agrega la sección 8 sobre el cupo y su limitación. **Una escritura u oferta
+demorada puede revivir un dato si ya se descartó su marca de borrado.**
+[Regla, cronología y contraejemplo](docs/metadata_cupo.md).
 
-Con tres replicas, Alfa = 4 y cinco tandas de doce claves, la metadata queda
-en 8 por replica en ambas mediciones. `Recientes` queda en 3; los valores
-quedan en 4 con desalojos y en 0 con borrados.
+Con tres réplicas, Alfa = 4 y cinco tandas de doce claves, la metadata se
+mantiene en 8 por réplica. Borde verificado con 9, 10 y 11 peers, y también con
+100 peers y Alfa = 400. El test del contraejemplo pasa al observar la
+resurrección mediante la API real. Requiere el componente `debugger` de OTP
+sin interfaz gráfica y la opción `debug_info` ya configurada en Rebar.
 
-**Verificacion de esta variante:** compilacion sin advertencias y
-**92/92 pruebas aprobadas**. El caso borde se reproduce con `start_link`,
-`put`, `delete`, `get` y `stop` reales. El debugger de OTP pausa P1 al
-entrar a `replicar/3`; no se construyen mensajes ni versiones en el test.
-Su resultado esperado es la resurreccion conocida: no acredita seguridad
-del borrado. Las pruebas anteriores de entregas sinteticas de este caso
-fueron reemplazadas por esta reproduccion por API; los 83 tests historicos
-permanecen sin cambiar y pasan con el nuevo piso del cupo.
-
-Para ese test se necesita el componente `debugger` de Erlang/OTP, sin interfaz
-grafica. `rebar.config` ya compila con `debug_info`, necesario para el punto de
-pausa. El test retira el punto de pausa y la interpretacion al terminar.
-
-La tabla siguiente y el PDF enlazado al principio describen la entrega
-original; no acreditan la correccion de esta variante. El informe fuente
-explicita la limitacion actual. Trabajo aislado en una rama y PR experimental;
-no implica reentrega ni integracion en main.
 
 ## Requisitos y estado
 
@@ -46,14 +31,14 @@ no implica reentrega ni integracion en main.
 | --- | --- | --- |
 | §§2–3, 4.1 · API y arranque | **Implementado y verificado** | `simple_kv` exporta `start_link/2`, `stop/1`, `put/3`, `put/4`, `delete/2` y `get/2`. Valida `Count` y admite α configurable desde 3. Hay pruebas de enlaces, parámetros inválidos y términos compuestos. [API](src/simple_kv.erl) · [Tests](test/simple_kv_tests.erl) |
 | §§3, 7 · Cierre | **Implementado y verificado** | `stop/1` monitorea y espera la terminación de cada réplica. El test demora una réplica más de un segundo y exige `ok` con todos los pids terminados. [Test](test/simple_kv_tests.erl#L95) |
-| §§4.2–4.5, 5.3 · Replicación asincrónica, conflictos y borrados | **Implementado y verificado** | Envío directo a todos los pares y orden total de versiones en una BEAM. Los tests cubren escrituras concurrentes, órdenes opuestos, un `put` anterior al borrado y un borrado anterior a la escritura. [Versiones](src/simple_kv_replicacion.erl) · [Tests](test/simple_kv_replicacion_tests.erl) |
+| §§4.2–4.5, 5.3 · Replicación asincrónica, conflictos y borrados | **Limitación conocida en §4.5** | Envío directo a todos los pares y orden total de versiones en una BEAM. Los tests cubren órdenes opuestos y reproducen la resurrección después de descartar una marca de borrado. [Versiones](src/simple_kv_replicacion.erl) · [Tests](test/simple_kv_replicacion_tests.erl) |
 | §4.6 · TTL | **Implementado y verificado** | Se valida en el invocante y se propaga el vencimiento original. Se controla al devolver el resultado, también si vence durante una consulta. [Reloj](src/simple_kv_ttl.erl) · [TTL](test/simple_kv_ttl_tests.erl) · [Consultas](test/simple_kv_consultas_tests.erl) |
 | §4.7 · Capacidad y protección del 75 % | **Implementado y verificado bajo la interpretación documentada** | El mapa tiene como máximo α plazas. Se protege `ceil(3 × α / 4)` de las últimas escrituras conocidas por clave, incluidas las remotas. Un vencido protegido conserva su plaza hasta salir del grupo y un borrado libera la plaza. Entre los elegibles se toma primero un vencido y luego el más antiguo si todos siguen vigentes. [Capacidad](src/simple_kv_capacidad.erl) · [Frontera, TTL y borrado](test/simple_kv_capacidad_tests.erl) |
 | §4.7 · Ofertas y terminación | **Implementado y verificado** | Se ofrece cada víctima vigente. El receptor puede usar una plaza libre, la de la misma clave o la de un vencido elegible. Al procesar una oferta no se emiten otras. [Implementación](src/simple_kv_capacidad.erl) · [Tests](test/simple_kv_desalojo_tests.erl) |
-| §§4.3, 4.8 · Lecturas y convergencia observable | **Implementado y verificado en los casos de prueba** | Un `get` sin copia ni borrado local consulta a los pares y usa la mayor versión. Con un par demorado se probó que ambos responden el valor correcto aunque solo uno lo conserve. El informe justifica la convergencia tras la propagación. [Lecturas](src/simple_kv_replica.erl) · [Tests](test/simple_kv_consultas_tests.erl) |
+| §§4.3, 4.8 · Lecturas y convergencia observable | **Implementado y verificado en los casos de prueba** | Un `get` sin copia ni borrado local consulta a los pares y usa la mayor versión. Con un par demorado se probó que ambos responden el valor correcto aunque solo uno lo conserve. La sección 8 del informe describe el caso que puede quedar incorrecto aun tras la propagación. [Lecturas](src/simple_kv_replica.erl) · [Tests](test/simple_kv_consultas_tests.erl) |
 | §§5.1–5.2 · Correlación y ausencia de deadlock | **Implementado y verificado para el protocolo válido** | Referencias por pedido y consulta, una respuesta por par y descarte de mensajes inesperados. Las réplicas contestan consultas mientras otras están pendientes. [Tests](test/simple_kv_consultas_tests.erl) |
 | §6 · Restricciones y compilación | **Implementado y verificado** | Estado en argumentos del ciclo, sin dependencias de behaviours ni almacenamiento externo. El nombre de `src/simple_kv_ttl.erl` coincide con el del módulo. |
-| §8 · Tests propios e informe de hasta cinco páginas | **Implementado y verificado** | La suite incluye escenarios por API y pruebas controladas del protocolo. El PDF tiene cuatro páginas e incluye la tabla de mensajes, los argumentos de corrección y ejemplos de lectura y desalojo. |
+| §8 · Tests propios e informe de hasta cinco páginas | **Implementado y verificado** | La suite incluye escenarios por API y pruebas controladas del protocolo. El PDF conserva cuatro páginas de la entrega original y suma la sección 8 en la quinta. |
 
 ## Alcance de las decisiones
 
@@ -68,6 +53,6 @@ rebar3 compile
 rebar3 eunit
 ```
 
-**Resultado historico de la entrega original:** 83/83 tests EUnit y compilacion sin advertencias. Para la variante actual, ver el estado experimental de arriba: 92/92, incluyendo la caracterizacion del defecto conocido.
+**Resultado de esta rama:** 93/93 tests EUnit y compilación sin advertencias. Incluye la prueba que reproduce la limitación conocida del borrado.
 
 La compilación directa se verifica con `erlc +warn_all -Werror -o <directorio-temporal> src/*.erl test/*.erl`. Se asume una sola BEAM, procesos vivos y un único `stop/1` al final con todos los pids devueltos por `start_link/2`.

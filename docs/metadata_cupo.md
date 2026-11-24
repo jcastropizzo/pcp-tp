@@ -4,11 +4,12 @@
 
 Por réplica, `Pares` contiene las otras réplicas, sin incluir al proceso local.
 La función `simple_kv_almacen:cupo_metadatos/2` recibe la cantidad de peers y α.
-El cupo es `max(2, length(Pares)) * Alfa`. Con tres réplicas y α = 4, cada
+El cupo es `max(2, min(10, length(Pares))) * Alfa`. Con tres réplicas y α = 4, cada
 réplica tiene dos peers y el cupo es **8 entradas totales de metadata**.
-Con 0, 1 o 2 peers se usa `2 * Alfa` como piso; para más de 2 peers se
-usa su cantidad real. Este piso también se aplica a una sola réplica. El máximo de plazas de valores del sistema, en cambio,
-es `Count * Alfa`: peers y cantidad total de réplicas no son lo mismo.
+Con 0, 1 o 2 peers se usa `2 * Alfa`. Entre 3 y 9 se usa su cantidad real;
+con 10 o más se usa `10 * Alfa`. El techo se aplica solo al presupuesto de
+metadata. Los mensajes se siguen enviando a todos los pares. Las plazas de
+valores del sistema siguen limitadas por `Count * Alfa`.
 
 Antes de volver al ciclo de recepción se conserva toda la metadata de claves
 con valor residente. Las plazas restantes se completan con las marcas de mayor
@@ -150,7 +151,7 @@ sigue siendo experimental y no esta listo para reentrega.
 ## Resultado de la verificacion
 
 Compilacion con `rebar3 compile` y compilacion directa con
-`erlc +warn_all -Werror` sin advertencias. Suite completa: **92/92 aprobados**,
+`erlc +warn_all -Werror` sin advertencias. Suite completa: **93/93 aprobados**,
 sobre una copia temporal de los mismos fuentes. Incluye los 83 tests historicos
 sin modificar, cinco tests del calculo/recorte y cuatro tests de metadata.
 
@@ -160,7 +161,7 @@ valores = 4 con desalojo y 0 con borrado. La prueba por API del caso borde pasa
 al observar `{ok, rojo}` en lugar del resultado correcto segun la consigna,
 `not_found`. Que la suite pase no acredita la seguridad del borrado.
 
-El nuevo piso de dos peers conserva las marcas esperadas por seis pruebas
+El piso de dos peers conserva las marcas esperadas por seis pruebas
 historicas que fallaban con el piso anterior de uno; no se cambiaron sus
 expectativas. El componente `debugger` de OTP y la compilacion con `debug_info`
 (ya configurada en `rebar.config`) son necesarios para la prueba por API.
