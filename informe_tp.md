@@ -90,3 +90,21 @@ Con α = 5 se protegen cuatro escrituras. Una réplica escribe `a`, `b`, `c`, `d
 | Llega `g` | `d, e, f, g` | `c`, vencida y elegible | `a, d, e, f, g` |
 
 Entre `f` y `g`, `c` sigue ocupando una plaza protegida y `get(P, c)` devuelve `not_found`. En ambos desalojos se conserva `a`, que es la escritura más antigua, porque la prioridad entre los elegibles la tiene una vencida.
+
+## 8. Anexo reentrega - Cupo de metadata por réplica
+
+### Regla de retención
+
+Sea `P` la cantidad de otras réplicas. El cupo local de `Metadatos` es `(min(10, P) + 1) × α`. Se suma la réplica local y se cuentan hasta diez pares. Con hasta once réplicas, el cupo es `N × α`, donde `N` es la cantidad total de réplicas. Por ejemplo, con α = 4, una réplica tiene un cupo de 4, tres réplicas tienen 12 por réplica y once o más tienen 44. Los mensajes del protocolo se siguen enviando a todos los pares.
+
+Al volver al ciclo de recepción se conserva la metadata de todas las claves que tienen un valor en `Valores`. Siempre entra porque el mapa de valores tiene hasta α entradas. El espacio restante se completa con las marcas de borrado o desalojo de mayor versión. Las marcas restantes se descartan. `Recientes` conserva la política de la sección 5 y el mapa de valores conserva su límite de α.
+
+La fórmula es una heurística de tamaño pensada para valores chicos de α y pocos pares. El mapa tiene hasta 11 × α entradas persistentes por réplica, independientemente de cuántas claves hayan pasado. El techo limita el efecto de agregar pares, pero el cupo sigue creciendo con α. Con α grande hay que reevaluar el consumo de memoria y el costo de ordenar las marcas al recortar. Con más de diez pares se usa el mismo presupuesto aunque haya más tráfico de replicación.
+
+### Limitación ante mensajes demorados
+
+Las garantías de borrado y convergencia de las secciones 2 y 6 dependen de que se conserve la marca que impide aceptar una versión anterior. El recorte por cupo puede eliminarla aunque haya escrituras u ofertas pendientes de esa clave.
+
+Con tres réplicas y α = 4, el cupo es 12. P1 escribe `k = rojo` y se demora antes de propagar su escritura. P2 borra `k` y después otras doce claves. P3 procesa esos borrados y descarta la marca de `k`. Cuando P1 reanuda su envío, P3 recibe la escritura vieja y puede volver a guardar `rojo` porque ya no conserva el borrado. En ese caso, `get(P3, k)` devuelve `{ok, rojo}` aunque la respuesta esperada sea `not_found`. Los mensajes de P1 y P2 tienen emisores distintos. Este orden respeta FIFO y el error puede persistir una vez procesados todos los mensajes. El cupo por sí solo no garantiza el borrado exigido en §4.5.
+
+La suite verifica los bordes del cupo y, con tres réplicas, observa 12 entradas por réplica después de cada tanda de 12 claves nuevas. La regresión por API que reproduce la resurrección comprueba la limitación descrita en esta sección.

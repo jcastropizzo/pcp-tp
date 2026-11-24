@@ -168,7 +168,8 @@ recepcion_replicada_limita_capacidad_y_no_desaloja_por_duplicados_test() ->
         ),
         Antes = [{N, consultar_local(Pid, N)} || N <- lists:seq(1, 17)],
         ?assertEqual(16, length([N || {N, {ok, {_, {valor, _, _}}}} <- Antes])),
-        ?assertEqual(1, length([N || {N, {ok, {_, desalojado}}} <- Antes])),
+        %% En una réplica sola las 16 entradas residentes ocupan todo el cupo.
+        ?assertEqual(error, proplists:get_value(1, Antes)),
         lists:foreach(
             fun(N) -> ?assertEqual({ok, {N, {valor, N, infinity}}}, proplists:get_value(N, Antes)) end,
             lists:seq(6, 17)
@@ -255,11 +256,12 @@ vencida_sale_al_perder_proteccion_test() ->
         ok = simple_kv:put(P, c, vencido, 0),
         escribir(P, [d, e]),
         inyectar_escrituras_remotas(P, [f]),
-        ?assertMatch({ok, {_, desalojado}}, consultar_local(P, b)),
+        %% Con el mapa lleno, el cupo de una réplica sola descarta la marca.
+        ?assertEqual(error, consultar_local(P, b)),
         ?assertMatch({ok, {_, {valor, vencido, _}}}, consultar_local(P, c)),
         ?assertEqual(not_found, simple_kv:get(P, c)),
         inyectar_escrituras_remotas(P, [g]),
-        ?assertMatch({ok, {_, desalojado}}, consultar_local(P, c)),
+        ?assertEqual(error, consultar_local(P, c)),
         ?assertEqual([{ok, K} || K <- [a, d, e, f, g]], lecturas(P, [a, d, e, f, g]))
     after
         simple_kv:stop([P])
@@ -274,8 +276,11 @@ delete_libera_plaza_de_vencido_protegido_test() ->
         {ok, Entrada} = consultar_local(P, c),
         ok = simple_kv:delete(P, c),
         P ! {replicar, c, Entrada},
-        escribir(P, [d]),
+        %% La marca todavía rechaza la versión anterior antes de llenar el cupo.
         ?assertMatch({ok, {_, borrado}}, consultar_local(P, c)),
+        escribir(P, [d]),
+        %% Los tres residentes desplazan la marca del borrado.
+        ?assertEqual(error, consultar_local(P, c)),
         ?assertEqual([{ok, a}, {ok, b}, not_found, {ok, d}], lecturas(P, [a, b, c, d]))
     after
         simple_kv:stop([P])

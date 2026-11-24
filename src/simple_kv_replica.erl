@@ -11,8 +11,15 @@
 
 init() ->
     receive
-        {configurar, Pares, Alfa} -> loop(Pares, Alfa, #{}, #{}, #{}, #{})
+        {configurar, Pares, Alfa} -> continuar(Pares, Alfa, #{}, #{}, #{}, #{})
     end.
+
+%% Pares excluye a self(). cupo_metadatos/2 suma el nodo local.
+%% El cupo se aplica antes de cada nueva recepcion, sin barrera ni timeout.
+continuar(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
+    Limite = simple_kv_almacen:cupo_metadatos(length(Pares), Alfa),
+    Acotados = simple_kv_almacen:limitar_metadatos(Limite, Valores, Metadatos),
+    loop(Pares, Alfa, Valores, Acotados, Recientes, Pendientes).
 
 loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
     receive
@@ -21,7 +28,7 @@ loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
             Solicitante !
                 {respuesta_consulta, RefConsulta, self(),
                  simple_kv_almacen:buscar_local(Clave, Valores, Metadatos)},
-            loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
+            continuar(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
 
         stop ->
             ok;
@@ -33,7 +40,7 @@ loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
                 simple_kv_capacidad:guardar(Pares, Alfa, Clave, Entrada, Valores, {Metadatos, Recientes}),
             Cliente ! {RefCliente, ok},
             simple_kv_replicacion:replicar(Pares, Clave, Entrada),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
+            continuar(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
 
         {delete, Cliente, RefCliente, Clave} ->
             Entrada = {simple_kv_replicacion:nueva_version(), borrado},
@@ -41,39 +48,39 @@ loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
             NuevosValores = maps:remove(Clave, Valores),
             Cliente ! {RefCliente, ok},
             simple_kv_replicacion:replicar(Pares, Clave, Entrada),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, Recientes, Pendientes);
+            continuar(Pares, Alfa, NuevosValores, NuevosMetadatos, Recientes, Pendientes);
 
         {get, Cliente, RefCliente, Clave} ->
             Local = simple_kv_almacen:buscar_local(Clave, Valores, Metadatos),
             case Local of
                 {ok, {_Version, {valor, _Valor, _Vence}}} ->
                     responder_lectura(Cliente, RefCliente, Local),
-                    loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
+                    continuar(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
                 {ok, {_Version, borrado}} ->
                     responder_lectura(Cliente, RefCliente, Local),
-                    loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
+                    continuar(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
                 _ when Pares =:= [] ->
                     responder_lectura(Cliente, RefCliente, Local),
-                    loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
+                    continuar(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes);
                 _ ->
                     NuevosPendientes =
                         consultar_pares(Pares, Cliente, RefCliente, Clave, Local, Pendientes),
-                    loop(Pares, Alfa, Valores, Metadatos, Recientes, NuevosPendientes)
+                    continuar(Pares, Alfa, Valores, Metadatos, Recientes, NuevosPendientes)
             end;
 
         {replicar, Clave, {_Version, borrado} = Entrada} ->
             NuevosValores = simple_kv_almacen:aplicar_actualizacion(Clave, Entrada, Valores, Metadatos),
             NuevosMetadatos = simple_kv_almacen:registrar_metadatos(Clave, Entrada, Metadatos),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, Recientes, Pendientes);
+            continuar(Pares, Alfa, NuevosValores, NuevosMetadatos, Recientes, Pendientes);
         {replicar, Clave, {_Version, {valor, _, _}} = Entrada} ->
             {NuevosValores, NuevosMetadatos, NuevosRecientes} =
                 simple_kv_capacidad:guardar(Pares, Alfa, Clave, Entrada, Valores, {Metadatos, Recientes}),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
+            continuar(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
 
         {ofrecer, Clave, Entrada} ->
             {NuevosValores, NuevosMetadatos, NuevosRecientes} =
                 simple_kv_capacidad:aceptar_oferta(Clave, Entrada, Alfa, Valores, Metadatos, Recientes),
-            loop(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
+            continuar(Pares, Alfa, NuevosValores, NuevosMetadatos, NuevosRecientes, Pendientes);
 
         {respuesta_consulta, RefConsulta, Par, Resultado} ->
             {NuevosPendientes, Respuesta} =
@@ -82,10 +89,10 @@ loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes) ->
                 sin_respuesta -> ok;
                 {Cliente, RefCliente, Final} -> responder_lectura(Cliente, RefCliente, Final)
             end,
-            loop(Pares, Alfa, Valores, Metadatos, Recientes, NuevosPendientes);
+            continuar(Pares, Alfa, Valores, Metadatos, Recientes, NuevosPendientes);
 
         _ ->
-            loop(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes)
+            continuar(Pares, Alfa, Valores, Metadatos, Recientes, Pendientes)
     end.
 
 consultar_pares(Pares, Cliente, RefCliente, Clave, Local, Pendientes) ->
