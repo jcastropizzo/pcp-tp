@@ -79,6 +79,9 @@ limite_preserva_residente_antiguo_test() ->
     ?assertEqual(#{k => {1, valor}, b => {3, desalojado}},
         simple_kv_almacen:limitar_metadatos(2, Valores, Meta)).
 
+%% LIMITACIÓN CONOCIDA DEL CUPO. Se espera que la marca de borrado de a
+%% desaparezca por ser la más vieja, aunque no se haya confirmado que no
+%% quedan mensajes atrasados. Este test documenta el recorte por versión.
 limite_conserva_marcas_de_mayor_version_test() ->
     Meta = #{a => {-3, borrado}, b => {-2, desalojado}, c => {-1, borrado}},
     ?assertEqual(#{b => {-2, desalojado}, c => {-1, borrado}},

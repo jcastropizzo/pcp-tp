@@ -2,11 +2,13 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% Tres replicas, alfa = 4: cupo = 2 * 4 = 8 por replica.
-%% Se mide con propagacion estabilizada. El ultimo test documenta por API
-%% la resurreccion conocida; que pase no demuestra seguridad del borrado.
+%% Estas mediciones comprueban solo la cantidad de entradas después de
+%% estabilizar la propagación. La seguridad del borrado queda fuera de ellas.
 metadata_se_estabiliza_con_desalojos_test() ->
     medir(desalojo).
 
+%% Esta prueba puede pasar aunque el recorte olvide una marca que todavía
+%% protege contra una escritura atrasada. Solo comprueba el tamaño del mapa.
 metadata_se_estabiliza_con_borrados_test() ->
     medir(borrado).
 
@@ -106,9 +108,10 @@ replica_unica_conserva_valores_con_cupo_dos_alfa_test() ->
                       [c, d, e, f])
     after simple_kv:stop([P]) end.
 
-%% Caso borde conocido por API real: el debugger solo demora la ejecucion de
-%% P1 al entrar a replicar/3. No se construyen mensajes ni versiones en el test.
-%% Esta expectativa documenta el defecto; no valida la seguridad del borrado.
+%% LIMITACIÓN CONOCIDA DEL CUPO. La prueba caracteriza un defecto y pasa
+%% deliberadamente cuando la escritura anterior al delete restaura la clave.
+%% La consigna exige not_found. Se usa la API real y el debugger solo demora
+%% a P1 al entrar a replicar/3, hasta que la marca salga del cupo en P3.
 caso_borde_documentado_put_viejo_restaura_borrada_por_api_test() ->
     ?assertNot(lists:member(simple_kv_replicacion, int:interpreted())),
     {module, simple_kv_replicacion} = int:i(simple_kv_replicacion),
@@ -147,6 +150,7 @@ caso_borde_documentado_put_viejo_restaura_borrada_por_api_test() ->
         esperar_estados([P1], fun({V, M, _R, _P}) ->
             not maps:is_key(k, V) andalso maps:is_key({relleno, Cupo}, M)
         end, Restaurada),
+        %% {ok, rojo} es el defecto observado. El resultado correcto sería not_found.
         ?assertEqual({ok, rojo}, simple_kv:get(P3, k))
     after
         int:no_break(simple_kv_replicacion),
