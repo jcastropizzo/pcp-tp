@@ -91,7 +91,7 @@ Con α = 5 se protegen cuatro escrituras. Una réplica escribe `a`, `b`, `c`, `d
 
 Entre `f` y `g`, `c` sigue ocupando una plaza protegida y `get(P, c)` devuelve `not_found`. En ambos desalojos se conserva `a`, que es la escritura más antigua, porque la prioridad entre los elegibles la tiene una vencida.
 
-## 8. Cupo de metadata por réplica
+## 8. Anexo reentrega - Cupo de metadata por réplica
 
 ### Regla de retención
 
